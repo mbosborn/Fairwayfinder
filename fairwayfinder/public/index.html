@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FairwayFinder — Live Tracker</title>
+<!-- Supabase client for realtime + reads -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0e0a;--panel:#121712;--panel-2:#1a221a;--line-solid:#2a352a;
+    --fairway:#2f7d32;--fairway-bright:#43c948;--flag:#e8b400;--red:#c63434;
+    --red-soft:#e57373;--txt:#eef2ee;--txt-dim:#8d978d;--gold:#ffd24a;--mist:#9fe6a2;
+    --shadow:0 8px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--txt);font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:0 0 80px}
+  .topbar{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,#0d140d,rgba(13,20,13,.92));backdrop-filter:blur(10px);border-bottom:1px solid var(--line-solid);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:11px;margin-right:auto}
+  .flagicon{width:30px;height:30px;flex:none}
+  .brand .name{font-size:19px;font-weight:800;letter-spacing:-.03em}
+  .brand .name .accent{color:var(--fairway-bright)}
+  .brand .sub{font-size:11px;color:var(--txt-dim);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-top:1px}
+  .evt{font-size:14px;font-weight:700;text-align:right}
+  .evt .small{font-size:11px;color:var(--txt-dim);font-weight:600}
+  .btn{border:1px solid var(--line-solid);background:var(--panel-2);color:var(--txt);padding:9px 15px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap}
+  .btn:hover{border-color:var(--fairway);background:#202b20}
+  .btn.primary{background:var(--fairway);border-color:var(--fairway);color:#fff}
+  .btn.primary:hover{background:var(--fairway-bright);border-color:var(--fairway-bright)}
+  .btn.ghost{background:transparent}
+  .btn svg{width:15px;height:15px}
+  .btn.spin svg{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .wrap{max-width:1000px;margin:0 auto;padding:22px 20px}
+  .tabs{display:flex;gap:4px;margin-bottom:22px;background:var(--panel);padding:5px;border-radius:12px;border:1px solid var(--line-solid);width:fit-content}
+  .tab{padding:9px 18px;border-radius:8px;font-size:13.5px;font-weight:700;color:var(--txt-dim);cursor:pointer;border:none;background:transparent}
+  .tab.active{background:var(--fairway);color:#fff}
+  .panel{background:var(--panel);border:1px solid var(--line-solid);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+  .panel+.panel{margin-top:18px}
+  .panel-head{padding:16px 20px;border-bottom:1px solid var(--line-solid);display:flex;align-items:center;gap:12px}
+  .panel-head h2{font-size:15px;font-weight:800}
+  .panel-head .meta{font-size:12px;color:var(--txt-dim);margin-left:auto;font-weight:600}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--fairway-bright);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(67,201,72,.5)}70%{box-shadow:0 0 0 7px rgba(67,201,72,0)}100%{box-shadow:0 0 0 0 rgba(67,201,72,0)}}
+  .lb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:18px}
+  .owner-card{background:var(--panel-2);border:1px solid var(--line-solid);border-radius:13px;padding:16px;position:relative;overflow:hidden;transition:.2s}
+  .owner-card.rank1{border-color:var(--gold);background:linear-gradient(165deg,#211d0e,var(--panel-2) 55%)}
+  .owner-card .rankbadge{position:absolute;top:13px;right:14px;font-size:11px;font-weight:800;color:var(--txt-dim)}
+  .owner-card.rank1 .rankbadge{color:var(--gold)}
+  .owner-card .oname{font-size:17px;font-weight:800;margin-bottom:2px}
+  .owner-card .oteam{font-size:11.5px;color:var(--txt-dim);font-weight:600;margin-bottom:13px}
+  .owner-card .omoney{font-size:25px;font-weight:800;font-variant-numeric:tabular-nums}
+  .owner-card.rank1 .omoney{color:var(--gold)}
+  .owner-card .obar{height:5px;border-radius:3px;background:#0c100c;margin-top:13px;overflow:hidden}
+  .owner-card .obar i{display:block;height:100%;background:linear-gradient(90deg,var(--fairway),var(--fairway-bright));transition:width .6s}
+  .owner-card.rank1 .obar i{background:linear-gradient(90deg,#caa023,var(--gold))}
+  .owner-card .ometa{display:flex;gap:12px;margin-top:11px;font-size:11px;color:var(--txt-dim);font-weight:600}
+  .owner-card .ometa b{color:var(--mist)}
+  table{width:100%;border-collapse:collapse}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--txt-dim);font-weight:700;padding:11px 14px;border-bottom:1px solid var(--line-solid)}
+  thead th.c{text-align:center}
+  tbody td{padding:10px 14px;font-size:13.5px;border-bottom:1px solid #1c241c;font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom:none}
+  tbody td.c{text-align:center}
+  .gname{font-weight:600}.gname.mc{color:var(--red-soft)}
+  .mc-tag{font-size:10px;color:var(--red-soft);font-weight:700;margin-left:6px}
+  .score{font-weight:700}.prize{color:var(--mist);font-weight:700}.pos{color:var(--txt-dim);font-weight:700}
+  .chk{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;font-size:13px;font-weight:800}
+  .chk.yes{background:var(--fairway);color:#fff}.chk.no-cut{background:var(--red);color:#fff}
+  .tier-row td{background:var(--panel-2);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-dim);padding:8px 14px}
+  .tier-row.t4 td{color:var(--flag)}.tier-row.t3 td{color:var(--fairway-bright)}
+  .total-row td{background:#14181f;font-weight:800;border-top:2px solid var(--line-solid)}
+  .total-row .prize{color:var(--gold);font-size:15px}
+  .setup{padding:20px}
+  .owner-edit{background:var(--panel-2);border:1px solid var(--line-solid);border-radius:13px;padding:16px;margin-bottom:14px}
+  .owner-edit-head{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .inp{background:#0c100c;border:1px solid var(--line-solid);color:var(--txt);border-radius:8px;padding:9px 12px;font-size:14px;font-weight:600;font-family:inherit}
+  .inp:focus{outline:none;border-color:var(--fairway)}
+  .inp.team{font-weight:800;font-size:15px;flex:1}.inp.sm{font-size:12px;padding:7px 10px;width:150px}
+  .picks-list{display:flex;flex-direction:column;gap:6px}
+  .pick-row{display:flex;gap:8px;align-items:center}
+  .pick-row .num{font-size:11px;color:var(--txt-dim);font-weight:700;width:20px;text-align:right}
+  .pick-row .inp{flex:1}
+  .pick-row .del{background:transparent;border:none;color:var(--txt-dim);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:6px}
+  .pick-row .del:hover{color:var(--red-soft);background:#1c1414}
+  .rm-owner{margin-left:auto;background:transparent;border:1px solid #3a2020;color:var(--red-soft);padding:6px 11px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer}
+  .hint{font-size:12px;color:var(--txt-dim);padding:0 20px 20px;line-height:1.6}
+  .hint code{background:var(--panel-2);padding:2px 6px;border-radius:4px;color:var(--mist);font-size:11px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--fairway);color:#fff;padding:12px 22px;border-radius:11px;font-size:13.5px;font-weight:700;box-shadow:var(--shadow);z-index:200;opacity:0;transition:.3s}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+  .toast.err{background:var(--red)}
+  .lock{padding:60px 20px;text-align:center;color:var(--txt-dim)}
+  .lock h3{color:var(--txt);font-size:16px;margin-bottom:8px}
+  .lock input{margin:14px auto 0;display:block;text-align:center;max-width:240px}
+  .viewer-note{font-size:11px;color:var(--txt-dim);background:var(--panel-2);border:1px solid var(--line-solid);padding:5px 11px;border-radius:20px;font-weight:600}
+  .refresh-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--txt-dim);background:var(--panel-2);border:1px solid var(--line-solid);padding:6px 12px;border-radius:20px;font-variant-numeric:tabular-nums}
+  .refresh-pill .rp-dot{width:7px;height:7px;border-radius:50%;background:var(--fairway-bright)}
+  .refresh-pill.low{color:var(--flag);border-color:#4a3f15}.refresh-pill.low .rp-dot{background:var(--flag)}
+  .refresh-pill.out{color:var(--red-soft);border-color:#3a2020}.refresh-pill.out .rp-dot{background:var(--red)}
+  @media(max-width:560px){.wrap{padding:16px 13px}.brand .sub{display:none}.owner-card .omoney{font-size:22px}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <svg class="flagicon" viewBox="0 0 32 32" fill="none">
+      <path d="M8 3v26" stroke="#8d978d" stroke-width="2" stroke-linecap="round"/>
+      <path d="M9 4l14 4-14 4V4z" fill="#43c948"/>
+      <circle cx="8" cy="29" r="2.5" fill="#2f7d32"/>
+    </svg>
+    <div><div class="name">Fairway<span class="accent">Finder</span></div><div class="sub">Live Tournament Tracker</div></div>
+  </div>
+  <div class="evt"><span id="evtName">Loading…</span><div class="small" id="evtSub"></div></div>
+  <span class="viewer-note" id="modeNote" style="display:none">Viewer</span>
+  <span class="refresh-pill" id="refreshPill" title="Live score pulls used today">
+    <span class="rp-dot"></span><span id="rpText">—/20</span>
+  </span>
+  <button class="btn" id="refreshBtn" onclick="manualRefresh()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15"/></svg>
+    <span>Refresh scores</span>
+  </button>
+</div>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab active" data-view="board" onclick="setView('board')">Leaderboard</button>
+    <button class="tab" data-view="grid" onclick="setView('grid')">Picks Grid</button>
+    <button class="tab" data-view="setup" id="setupTab" onclick="setView('setup')" style="display:none">Teams</button>
+  </div>
+  <div id="view-board"></div>
+  <div id="view-grid" style="display:none"></div>
+  <div id="view-setup" style="display:none"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — these two values are injected at deploy time.
+   The setup guide tells you exactly where to paste them.
+   ============================================================ */
+const SUPABASE_URL = "__SUPABASE_URL__";
+const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---- admin mode: URL has #admin, prompts for the password once ----
+let ADMIN_KEY = sessionStorage.getItem('ff_admin') || null;
+const isAdminUrl = location.hash.replace('#','') === 'admin';
+
+// ---- prize structure by finishing position (scales with purse) ----
+// percentages of purse, standard USGA-style distribution
+const PCT = {1:.18,2:.108,3:.068,4:.048,5:.04,6:.0362,7:.0337,8:.0312,9:.0292,10:.0272,
+  11:.0252,12:.0232,13:.0215,14:.02,15:.0188,16:.0177,17:.0167,18:.0158,19:.015,20:.0143,
+  21:.0136,22:.013,23:.0124,24:.0119,25:.0114,26:.011,27:.0106,28:.0102,29:.0098,30:.0095,
+  35:.0079,40:.0064,45:.0052,50:.0042,55:.0038,60:.0035,65:.0032,70:.003};
+function prizeForPos(pos,purse){
+  if(pos==null||pos==='MC') return 0;
+  const n=parseInt(String(pos).replace(/[^0-9]/g,''),10);
+  if(isNaN(n)) return 0;
+  const keys=Object.keys(PCT).map(Number).sort((a,b)=>a-b);
+  for(const k of keys){ if(n<=k) return Math.round((purse||22500000)*PCT[k]/1000)*1000; }
+  return Math.round((purse||22500000)*.0025/1000)*1000;
+}
+
+function norm(name){
+  return String(name||'').toLowerCase()
+    .replace(/[åäâ]/g,'a').replace(/[éèê]/g,'e').replace(/[íì]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úü]/g,'u').replace(/ø/g,'o')
+    .replace(/[^a-z ]/g,'').replace(/\s+/g,' ').trim();
+}
+function nameKeys(name){
+  const n=norm(name); const keys=new Set([n]);
+  if(n.includes(',')){ const [l,f]=n.split(',').map(s=>s.trim()); keys.add(norm(f+' '+l)); }
+  return [...keys];
+}
+
+let STATE = {event_name:'',purse:22500000,owners:[],scores:{},updated_at:null};
+let view='board';
+
+function scoreFor(g){ for(const k of nameKeys(g)){ if(STATE.scores&&STATE.scores[k]) return STATE.scores[k]; } return null; }
+
+// =================== LOAD + REALTIME ===================
+async function loadState(refresh){
+  try{
+    const r = await fetch('/api/state'+(refresh?'?refresh=1':''));
+    const data = await r.json();
+    applyState(data);
+    // update the daily refresh counter badge
+    const used  = data._refreshUsed  ?? Number(r.headers.get('x-refresh-used')||0);
+    const limit = data._refreshLimit ?? Number(r.headers.get('x-refresh-limit')||20);
+    updateRefreshPill(used, limit);
+    if(r.headers.get('x-refresh-blocked')){ toast('Out of refreshes for today — resets at midnight','err'); }
+    else if(r.headers.get('x-refresh-error')){ toast('Live feed unavailable, showing last scores','err'); }
+  }catch(e){ toast('Could not load','err'); }
+}
+function updateRefreshPill(used, limit){
+  const left = Math.max(0, (limit||20) - (used||0));
+  const pill = document.getElementById('refreshPill');
+  const txt  = document.getElementById('rpText');
+  if(!pill||!txt) return;
+  txt.textContent = left + '/' + (limit||20);
+  pill.classList.toggle('low', left>0 && left<=5);
+  pill.classList.toggle('out', left<=0);
+  pill.title = left>0 ? `${left} live score pulls left today (resets at midnight)` : 'No refreshes left today — resets at midnight';
+  // disable the button when empty (admins still see the count)
+  const btn=document.getElementById('refreshBtn');
+  if(btn) btn.disabled = (left<=0);
+}
+function applyState(d){
+  if(!d) return;
+  STATE = {
+    event_name:d.event_name||STATE.event_name||'Tournament',
+    purse:d.purse||STATE.purse||22500000,
+    owners:d.owners||STATE.owners||[],
+    scores:d.scores||STATE.scores||{},
+    updated_at:d.updated_at||STATE.updated_at
+  };
+  render();
+}
+
+// Realtime: when the DB row changes, every open board updates instantly,
+// including the shared daily refresh counter.
+sb.channel('pool')
+  .on('postgres_changes',{event:'UPDATE',schema:'public',table:'pool_state'},
+      payload=>{
+        applyState(payload.new);
+        const today = new Date().toLocaleDateString('en-CA',{timeZone:'America/Chicago'});
+        const used = (payload.new.refresh_day===today) ? (payload.new.refresh_count||0) : 0;
+        updateRefreshPill(used, 20);
+      })
+  .subscribe();
+
+// Manual refresh only — scores update when an admin taps "Refresh now".
+
+// =================== VIEWS ===================
+function setView(v){
+  view=v;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===v));
+  ['board','grid','setup'].forEach(x=>document.getElementById('view-'+x).style.display=x===v?'':'none');
+  render();
+}
+function computeStandings(){
+  return STATE.owners.map(o=>{
+    let total=0,alive=0,mc=0;
+    const rows=(o.picks||[]).map(g=>{
+      const sc=scoreFor(g); const isMC=sc&&sc.pos==='MC';
+      const prize=sc?prizeForPos(sc.pos,STATE.purse):0;
+      if(sc){ isMC?mc++:alive++; } total+=prize;
+      return {golfer:g,sc,prize,isMC};
+    });
+    return {...o,total,alive,mc,rows};
+  }).sort((a,b)=>b.total-a.total);
+}
+function fmt(n){return '$'+(n||0).toLocaleString('en-US');}
+function scoreStr(sc){ if(!sc)return '—'; if(sc.pos==='MC')return 'MC'; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function renderBoard(){
+  const st=computeStandings(), maxT=Math.max(1,...st.map(o=>o.total));
+  const any=STATE.scores&&Object.keys(STATE.scores).length>0;
+  const cards=st.map((o,i)=>`<div class="owner-card ${i===0&&any?'rank1':''}">
+    <div class="rankbadge">${i===0&&any?'● LEADER':'#'+(i+1)}</div>
+    <div class="oname">${esc(o.name)}</div><div class="oteam">${esc(o.team||'')}</div>
+    <div class="omoney">${fmt(o.total)}</div>
+    <div class="obar"><i style="width:${Math.round(o.total/maxT*100)}%"></i></div>
+    <div class="ometa"><span>Alive <b>${o.alive}</b></span><span>Cut <b>${o.mc}</b></span></div></div>`).join('');
+  const upd=STATE.updated_at?new Date(STATE.updated_at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'no scores yet';
+  const detail=st.map(o=>{
+    const sorted=[...o.rows].sort((a,b)=>b.prize-a.prize||(a.isMC?1:0)-(b.isMC?1:0));
+    const body=sorted.map(r=>`<tr><td class="gname ${r.isMC?'mc':''}">${esc(r.golfer)}${r.isMC?'<span class="mc-tag">MC</span>':''}</td>
+      <td class="c pos">${r.sc?(r.sc.pos==='MC'?'—':r.sc.pos):'—'}</td>
+      <td class="c score" style="${r.isMC?'color:var(--red-soft)':''}">${scoreStr(r.sc)}</td>
+      <td class="c prize">${r.prize?fmt(r.prize):'—'}</td></tr>`).join('');
+    return `<div class="panel"><div class="panel-head"><h2>${esc(o.name)} <span style="color:var(--txt-dim);font-weight:600">· ${esc(o.team||'')}</span></h2><span class="meta">${fmt(o.total)}</span></div>
+      <table><thead><tr><th>Golfer</th><th class="c">Pos</th><th class="c">Score</th><th class="c">Prize</th></tr></thead>
+      <tbody>${body}<tr class="total-row"><td>Total</td><td></td><td></td><td class="c prize">${fmt(o.total)}</td></tr></tbody></table></div>`;
+  }).join('');
+  document.getElementById('view-board').innerHTML=`<div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}<h2>Standings</h2><span class="meta">Updated: ${upd}</span></div><div class="lb-grid">${cards}</div><div class="hint">Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Tap <b>Refresh scores</b> to pull the latest — the counter up top shows how many of the 20 daily pulls are left.</div></div>${detail}`;
+}
+
+function renderGrid(){
+  const all={}; STATE.owners.forEach(o=>(o.picks||[]).forEach(g=>{all[g]=(all[g]||0)+1;}));
+  let golfers=Object.keys(all);
+  golfers.sort((a,b)=>{ if(all[b]!==all[a])return all[b]-all[a];
+    const pa=scoreFor(a),pb=scoreFor(b);
+    const na=pa?parseInt(String(pa.pos).replace(/\D/g,''))||999:999;
+    const nb=pb?parseInt(String(pb.pos).replace(/\D/g,''))||999:999; return na-nb; });
+  const tiers={}; golfers.forEach(g=>{const t=all[g];(tiers[t]=tiers[t]||[]).push(g);});
+  const owners=STATE.owners,maxT=owners.length;
+  let rows='';
+  for(let t=maxT;t>=1;t--){ if(!tiers[t])continue;
+    const label=t===maxT?`Picked by all ${maxT}`:(t===1?'Unique — 1 owner':`${t} of ${maxT}`);
+    rows+=`<tr class="tier-row ${t===maxT?'t4':t===maxT-1?'t3':''}"><td colspan="${owners.length+3}">${label}</td></tr>`;
+    tiers[t].forEach(g=>{ const sc=scoreFor(g),isMC=sc&&sc.pos==='MC';
+      const checks=owners.map(o=>{ const has=(o.picks||[]).some(p=>norm(p)===norm(g));
+        return has?`<td class="c"><span class="chk ${isMC?'no-cut':'yes'}">${isMC?'✕':'✓'}</span></td>`:'<td class="c"></td>'; }).join('');
+      rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(g)}${isMC?'<span class="mc-tag">MC</span>':''}</td>
+        <td class="c pos">${sc?(sc.pos==='MC'?'—':sc.pos):'—'}</td>
+        <td class="c score" style="${isMC?'color:var(--red-soft)':''}">${scoreStr(sc)}</td>${checks}</tr>`; });
+  }
+  const head=`<tr><th>Golfer</th><th class="c">Pos</th><th class="c">Score</th>${owners.map(o=>`<th class="c">${esc(o.name)}</th>`).join('')}</tr>`;
+  document.getElementById('view-grid').innerHTML=`<div class="panel"><div class="panel-head"><h2>Picks Grid</h2><span class="meta">${golfers.length} golfers · ${owners.length} owners</span></div><table><thead>${head}</thead><tbody>${rows||'<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--txt-dim)">Teams not set yet.</td></tr>'}</tbody></table><div class="hint">Green ✓ = made cut · red ✕ = missed cut. Grouped by how many owners share each golfer.</div></div>`;
+}
+
+function renderSetup(){
+  if(!ADMIN_KEY){
+    document.getElementById('view-setup').innerHTML=`<div class="panel"><div class="lock">
+      <h3>Admin access</h3><p>Enter the admin password to edit teams.</p>
+      <input class="inp" id="adminPw" type="password" placeholder="Admin password" onkeydown="if(event.key==='Enter')unlockAdmin()">
+      <button class="btn primary" style="margin:14px auto 0" onclick="unlockAdmin()">Unlock</button></div></div>`;
+    return;
+  }
+  const owners=STATE.owners.map(o=>`<div class="owner-edit" data-id="${o.id}">
+    <div class="owner-edit-head">
+      <input class="inp team" value="${esc(o.team||'')}" placeholder="Team name" onchange="upd(${o.id},'team',this.value)">
+      <input class="inp sm" value="${esc(o.name)}" placeholder="Owner" onchange="upd(${o.id},'name',this.value)">
+      <button class="rm-owner" onclick="rmOwner(${o.id})">Remove</button></div>
+    <div class="picks-list">${(o.picks||[]).map((p,i)=>`<div class="pick-row"><span class="num">${i+1}</span>
+      <input class="inp" value="${esc(p)}" placeholder="Golfer name" onchange="updPick(${o.id},${i},this.value)">
+      <button class="del" onclick="rmPick(${o.id},${i})">×</button></div>`).join('')}</div>
+    <button class="btn ghost" style="margin-top:10px;font-size:12px" onclick="addPick(${o.id})">+ Add golfer</button></div>`).join('');
+  document.getElementById('view-setup').innerHTML=`<div class="panel"><div class="panel-head"><h2>Teams &amp; picks</h2><span class="meta">${STATE.owners.length} owners</span></div>
+    <div class="setup">${owners}<button class="btn primary" onclick="addOwner()">+ Add owner</button>
+    <button class="btn" style="margin-left:8px" onclick="saveTeams()">Save changes</button></div>
+    <div class="hint">Type each owner's golfers in pick order. Names match the live leaderboard automatically (<code>Ludvig Aberg</code> or <code>Aberg, Ludvig</code> both work). Click <b>Save changes</b> and every viewer's board updates live. The tournament name &amp; purse load automatically.</div></div>`;
+}
+function render(){ if(view==='board')renderBoard(); else if(view==='grid')renderGrid(); else renderSetup();
+  document.getElementById('evtName').textContent=STATE.event_name||'Tournament';
+  document.getElementById('evtSub').textContent=STATE.purse?fmt(STATE.purse)+' purse':''; }
+
+// =================== ADMIN EDITS (local until Save) ===================
+function unlockAdmin(){ const pw=document.getElementById('adminPw').value.trim(); if(!pw)return;
+  ADMIN_KEY=pw; sessionStorage.setItem('ff_admin',pw); renderSetup(); toast('Admin unlocked'); }
+function upd(id,f,v){ const o=STATE.owners.find(x=>x.id===id); if(o)o[f]=v; }
+function updPick(id,i,v){ const o=STATE.owners.find(x=>x.id===id); if(o)o.picks[i]=v; }
+function rmPick(id,i){ const o=STATE.owners.find(x=>x.id===id); if(o){o.picks.splice(i,1); renderSetup();} }
+function addPick(id){ const o=STATE.owners.find(x=>x.id===id); if(o){o.picks=o.picks||[];o.picks.push(''); renderSetup();} }
+function addOwner(){ const nid=Math.max(0,...STATE.owners.map(o=>o.id||0))+1;
+  STATE.owners.push({id:nid,name:'New owner',team:'New Team',picks:['']}); renderSetup(); }
+function rmOwner(id){ if(!confirm('Remove this owner?'))return; STATE.owners=STATE.owners.filter(o=>o.id!==id); renderSetup(); }
+
+async function saveTeams(){
+  try{
+    const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({adminKey:ADMIN_KEY,owners:STATE.owners})});
+    const d=await r.json();
+    if(!r.ok){ toast(d.error||'Save failed','err'); if(r.status===401){ADMIN_KEY=null;sessionStorage.removeItem('ff_admin');renderSetup();} return; }
+    toast('Saved — everyone\'s board updated');
+  }catch(e){ toast('Save failed','err'); }
+}
+
+// =================== REFRESH ===================
+// Anyone can pull live scores. The shared daily counter (X/20) keeps the
+// free feed budget visible so nobody burns through it by accident.
+async function manualRefresh(){
+  const b=document.getElementById('refreshBtn');
+  if(b.disabled) return;
+  b.classList.add('spin');
+  await loadState(true);
+  b.classList.remove('spin');
+}
+
+let toastT;
+function toast(m,t){ const el=document.getElementById('toast'); el.textContent=m; el.className='toast show'+(t==='err'?' err':''); clearTimeout(toastT); toastT=setTimeout(()=>el.className='toast',2600); }
+
+// =================== INIT ===================
+if(isAdminUrl){
+  document.getElementById('setupTab').style.display='';
+} else {
+  document.getElementById('modeNote').style.display='';
+}
+loadState(false);
+</script>
+</body>
+</html>
