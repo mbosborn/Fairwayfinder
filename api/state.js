@@ -94,7 +94,25 @@ async function currentEvent() {
   // Diagnostic breadcrumb: every candidate that was in-window this week, so a
   // wrong pick shows *why* right in the error message instead of another round trip.
   const candidates = inWindow.map(x => `${x.e.name || '?'} (id ${x.e.tournId || x.e.id || '?'})`);
-  return { event: result, candidates, usedFallback: !inWindow.length };
+
+  // Deeper diagnostic: if nothing was in-window, find ANY event whose name looks
+  // like a major, anywhere in the full schedule, and show its raw date fields.
+  // This tells us directly whether the window math is failing because of a
+  // field-name mismatch, a bad format, or the event genuinely not being listed.
+  let majorDebug = null;
+  if (!inWindow.length) {
+    const anyMajor = events.find(e => isMajorName(e.name));
+    if (anyMajor) {
+      const rawDate = JSON.stringify(anyMajor.date ?? { startDate: anyMajor.startDate, endDate: anyMajor.endDate });
+      const s = new Date(anyMajor.date?.start || anyMajor.startDate || 0).getTime();
+      const eEnd = new Date(anyMajor.date?.end || anyMajor.endDate || 0).getTime();
+      majorDebug = `found "${anyMajor.name}" (id ${anyMajor.tournId || anyMajor.id}) in full schedule but NOT in-window — raw date field: ${rawDate} :: parsed start=${new Date(s).toISOString()} end=${new Date(eEnd).toISOString()} vs now=${new Date(now).toISOString()}`;
+    } else {
+      majorDebug = `no event matching isMajorName() found anywhere in ${events.length} schedule entries for year=${year}`;
+    }
+  }
+
+  return { event: result, candidates, usedFallback: !inWindow.length, majorDebug };
 }
 
 function parToInt(p) {
@@ -358,11 +376,13 @@ export default async function handler(req, res) {
         res.setHeader('x-refresh-blocked', '1');
       } else if (canPullScores) {
         let candidates = [];
+        let majorDebug = null;
         try {
           const year = new Date().getFullYear();
           const picked = await currentEvent();
           ev = picked.event;
           candidates = picked.candidates;
+          majorDebug = picked.majorDebug;
           if (ev) {
             const evId = ev.tournId || ev.id;
             try {
@@ -374,10 +394,11 @@ export default async function handler(req, res) {
               remaining = Math.max(0, DAILY_LIMIT - used);
             } catch (e) {
               // Leaderboard fetch failed for the chosen event — show exactly which
-              // event was picked and every alternative candidate this week, so a
-              // wrong-tournament pick is obvious immediately instead of another guess.
+              // event was picked, every alternative candidate this week, and (if
+              // nothing was in-window) the real major event's raw date fields —
+              // so a wrong-tournament pick is obvious immediately, not another guess.
               const picked_txt = `${ev.name || '?'} (id ${evId})`;
-              const alt_txt = candidates.length ? ` | week's candidates: ${candidates.join(', ')}` : '';
+              const alt_txt = candidates.length ? ` | week's candidates: ${candidates.join(', ')}` : (majorDebug ? ` | ${majorDebug}` : '');
               throw new Error(`${e.message} :: picked "${picked_txt}"${alt_txt}`);
             }
           }
