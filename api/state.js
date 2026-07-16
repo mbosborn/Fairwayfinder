@@ -95,21 +95,25 @@ async function currentEvent() {
   // wrong pick shows *why* right in the error message instead of another round trip.
   const candidates = inWindow.map(x => `${x.e.name || '?'} (id ${x.e.tournId || x.e.id || '?'})`);
 
-  // Deeper diagnostic: if nothing was in-window, find ANY event whose name looks
-  // like a major, anywhere in the full schedule, and show its raw date fields.
-  // This tells us directly whether the window math is failing because of a
-  // field-name mismatch, a bad format, or the event genuinely not being listed.
+  // Deeper diagnostic: if nothing was in-window, dump the RAW event object for
+  // any major-named event, whole — so we see the real field names/shapes the
+  // feed actually uses instead of guessing at date.start/startDate again.
+  // (Never call toISOString() on a maybe-invalid date — that itself throws.)
+  function safeIso(ms) {
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : `INVALID(raw=${ms})`;
+  }
   let majorDebug = null;
   if (!inWindow.length) {
     const anyMajor = events.find(e => isMajorName(e.name));
     if (anyMajor) {
-      const rawDate = JSON.stringify(anyMajor.date ?? { startDate: anyMajor.startDate, endDate: anyMajor.endDate });
+      const raw = JSON.stringify(anyMajor).slice(0, 500);
       const s = new Date(anyMajor.date?.start || anyMajor.startDate || 0).getTime();
       const eEnd = new Date(anyMajor.date?.end || anyMajor.endDate || 0).getTime();
-      majorDebug = `found "${anyMajor.name}" (id ${anyMajor.tournId || anyMajor.id}) in full schedule but NOT in-window — raw date field: ${rawDate} :: parsed start=${new Date(s).toISOString()} end=${new Date(eEnd).toISOString()} vs now=${new Date(now).toISOString()}`;
+      majorDebug = `found "${anyMajor.name}" but NOT in-window — FULL raw object: ${raw} :: parsed start=${safeIso(s)} end=${safeIso(eEnd)} vs now=${safeIso(now)}`;
     } else {
       majorDebug = `no event matching isMajorName() found anywhere in ${events.length} schedule entries for year=${year}`;
     }
+
   }
 
   return { event: result, candidates, usedFallback: !inWindow.length, majorDebug };
