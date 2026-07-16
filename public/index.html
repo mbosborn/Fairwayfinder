@@ -45,6 +45,24 @@
   .refresh-pill.low{color:var(--goldB);border-color:#4a3f15}.refresh-pill.low .rp-dot{background:var(--goldB)}
   .refresh-pill.out{color:var(--red-soft);border-color:#3a2020}.refresh-pill.out .rp-dot{background:var(--watchB)}
   .viewer-note{font-size:10.5px;color:var(--muted);background:rgba(0,0,0,.2);border:1px solid var(--edge);padding:5px 10px;border-radius:20px;font-weight:600}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px}
+  .modal-box{background:var(--bg2);border:1px solid var(--edge);border-radius:14px;max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--edge)}
+  .modal-head h2{margin:0;font-size:18px}
+  .modal-x{background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1;padding:0 4px}
+  .modal-x:hover{color:var(--cream)}
+  .modal-body{padding:16px 20px;overflow-y:auto}
+  .verify-banner{padding:10px 14px;border-radius:9px;font-weight:700;font-size:13.5px;margin-bottom:14px}
+  .verify-banner.ok{background:rgba(67,201,72,.12);border:1px solid #1e4a20;color:var(--mist)}
+  .verify-banner.warn{background:rgba(192,57,43,.12);border:1px solid #5a2018;color:var(--red-soft)}
+  .verify-source-note{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5}
+  .verify-table{width:100%;border-collapse:collapse;font-size:13px}
+  .verify-table th{text-align:left;color:var(--muted);font-weight:700;font-size:11px;letter-spacing:.03em;padding:6px 8px;border-bottom:1px solid var(--edge)}
+  .verify-table td{padding:7px 8px;border-bottom:1px solid var(--edge2)}
+  .verify-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;display:inline-block}
+  .verify-tag.match{background:rgba(67,201,72,.15);color:var(--mist)}
+  .verify-tag.mismatch{background:rgba(192,57,43,.18);color:var(--red-soft)}
+  .verify-tag.nodata{background:rgba(255,255,255,.08);color:var(--muted)}
   .btn{border:1px solid var(--edge);background:rgba(0,0,0,.2);color:var(--cream);padding:8px 14px;border-radius:9px;
     font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:.15s;white-space:nowrap;font-family:inherit}
   .btn:hover{border-color:var(--gold)}
@@ -219,13 +237,27 @@
     </div>
   </div>
   <div class="evbox"><div class="ev" id="evLine"></div></div>
-  <span class="refresh-pill" id="refreshPill" title="Live score pulls used today"><span class="rp-dot"></span><span id="rpText">—/20</span></span>
+  <span class="refresh-pill" id="refreshPill" title="Auto-updates every 10 seconds"><span class="rp-dot"></span><span id="rpText">Loading…</span></span>
   <button class="btn" id="refreshBtn" onclick="manualRefresh()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15"/></svg>
     <span>Refresh scores</span>
   </button>
+  <button class="btn ghost" id="verifyBtn" onclick="openVerifyModal()" title="Cross-check final payouts against independent sources once the tournament is over">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+    <span>Verify payouts</span>
+  </button>
 </div>
 <div class="evbanner" id="evBanner">⛳ Every stroke counts</div>
+
+<div id="verifyModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeVerifyModal()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Verify final payouts</h2>
+      <button class="modal-x" onclick="closeVerifyModal()">×</button>
+    </div>
+    <div id="verifyBody" class="modal-body"><p style="color:var(--muted)">Loading…</p></div>
+  </div>
+</div>
 
 <div class="wrap">
   <div class="tabs">
@@ -255,13 +287,69 @@ const PCT = {1:.18,2:.108,3:.068,4:.048,5:.04,6:.0362,7:.0337,8:.0312,9:.0292,10
   11:.0252,12:.0232,13:.0215,14:.02,15:.0188,16:.0177,17:.0167,18:.0158,19:.015,20:.0143,
   21:.0136,22:.013,23:.0124,24:.0119,25:.0114,26:.011,27:.0106,28:.0102,29:.0098,30:.0095,
   35:.0079,40:.0064,45:.0052,50:.0042,55:.0038,60:.0035,65:.0032,70:.003};
-function prizeForPos(pos,purse){
-  if(pos==null||pos==='MC') return 0;
-  const n=parseInt(String(pos).replace(/[^0-9]/g,''),10);
-  if(isNaN(n)) return 0;
+// $ value of ONE solo position — the building block for tie-splitting below.
+// Not exported for direct use elsewhere; real payouts always go through the
+// tie-aware map, since a raw position number alone doesn't know who it's tied with.
+function _prizeForSinglePos(n, purse){
   const keys=Object.keys(PCT).map(Number).sort((a,b)=>a-b);
-  for(const k of keys){ if(n<=k) return Math.round((purse||22500000)*PCT[k]/1000)*1000; }
-  return Math.round((purse||22500000)*.0025/1000)*1000;
+  for(const k of keys){ if(n<=k) return (purse||22500000)*PCT[k]; }
+  return (purse||22500000)*.0025;
+}
+// Real tournament payouts split the combined prize money for every position a
+// tied group occupies evenly across that group — two golfers tied for 2nd each
+// get the AVERAGE of 2nd+3rd place money, not solo-2nd money each. This scans
+// the FULL field (not just picked golfers — someone else's tie still shifts
+// who's really in 4th) and builds normName -> $ accordingly. Cached per
+// scores+purse signature since it's a full-field scan, not a cheap lookup.
+//
+// Status handling matches real tour rules: DQ is always $0, like a missed cut.
+// A withdrawal is $0 if it happened before making the cut, but real tours
+// still pay LAST-PLACE money for a withdrawal after the cut (e.g. an injury
+// during Saturday's round) — not their position when they left, and not part
+// of the normal tie-grouping either, since it's a flat payout on top of the
+// regular field (matches how tours handle a "more than the nominal cut made
+// it" purse bump).
+let _prizeMapCache = null, _prizeMapSig = '';
+function buildPrizeMap(){
+  const scores = STATE.scores||{};
+  const purse = STATE.purse||22500000;
+  const sig = purse+'|'+Object.keys(scores).sort().map(k=>k+':'+scores[k].pos+':'+scores[k].score).join(',');
+  if(_prizeMapSig===sig) return _prizeMapCache;
+  const groups={}; // numeric score-to-par -> [normNames tied at that score]
+  const wdPaidNames=[];
+  for(const [nm,s] of Object.entries(scores)){
+    if(!s) continue;
+    if(s.pos==='WD_PAID'){ wdPaidNames.push(nm); continue; }
+    if(s.pos==='MC' || s.pos==='DQ' || s.score==null || typeof s.score!=='number') continue;
+    (groups[s.score]=groups[s.score]||[]).push(nm);
+  }
+  const sortedScores=Object.keys(groups).map(Number).sort((a,b)=>a-b); // best (lowest) first
+  const map={};
+  let cursor=1; // 1-indexed leaderboard position
+  for(const sc of sortedScores){
+    const names=groups[sc], k=names.length;
+    let sum=0; for(let i=0;i<k;i++) sum+=_prizeForSinglePos(cursor+i, purse);
+    const share=Math.round(sum/k/1000)*1000;
+    for(const nm of names) map[nm]=share;
+    cursor+=k;
+  }
+  if(wdPaidNames.length){
+    // "Last place" = the payout for the total number who made the cut,
+    // scored players plus these withdrawals — each WD gets that flat amount
+    // independently (they're not tied with each other in a scoring sense).
+    const madeCutCount = (cursor-1) + wdPaidNames.length;
+    const lastPlace = Math.round(_prizeForSinglePos(madeCutCount, purse)/1000)*1000;
+    for(const nm of wdPaidNames) map[nm]=lastPlace;
+  }
+  _prizeMapCache=map; _prizeMapSig=sig;
+  return map;
+}
+// Look up one golfer's tie-aware prize by trying the same name-key variants
+// scoreFor() uses, so it always matches whichever key STATE.scores stored it under.
+function prizeForGolfer(g){
+  const map = buildPrizeMap();
+  for(const k of nameKeys(g)){ if(STATE.scores && STATE.scores[k] && map[k]!=null) return map[k]; }
+  return 0;
 }
 function norm(name){
   return String(name||'').toLowerCase()
@@ -283,6 +371,15 @@ let lbNodes={};        // owner id -> row element
 let builtSig='';       // signature of current row set (to know when to rebuild vs animate)
 
 function scoreFor(g){ for(const k of nameKeys(g)){ if(STATE.scores&&STATE.scores[k]) return STATE.scores[k]; } return null; }
+// Short display tag for a golfer who's no longer accumulating a live score —
+// missed cut, disqualified, or withdrew. Returns null if still playing normally.
+function doneStatus(sc){
+  if(!sc) return null;
+  if(sc.pos==='MC') return 'MC';
+  if(sc.pos==='DQ') return 'DQ';
+  if(sc.pos==='WD_PAID') return 'WD';
+  return null;
+}
 
 /* =================== THEME ENGINE =================== */
 const THEMES = {
@@ -317,31 +414,31 @@ function applyTheme(){
 
 /* =================== LOAD + REALTIME =================== */
 let LAST_FIELD_ERROR = null; // shown on the Teams page so field-fetch issues are self-diagnosing
+let LAST_PURSE_ERROR = null; // shown near the purse field so auto-lookup issues are self-diagnosing
 async function loadState(refresh){
   try{
     const r = await fetch('/api/state'+(refresh?'?refresh=1':''));
     const data = await r.json();
     LAST_FIELD_ERROR = data._fieldError || r.headers.get('x-field-error') || null;
+    LAST_PURSE_ERROR = data._purseError || r.headers.get('x-purse-error') || null;
     applyState(data);
-    const used  = data._refreshUsed  ?? Number(r.headers.get('x-refresh-used')||0);
-    const limit = data._refreshLimit ?? Number(r.headers.get('x-refresh-limit')||20);
-    updateRefreshPill(used, limit);
-    if(r.headers.get('x-refresh-blocked')){ toast('Out of refreshes for today — resets at midnight','err'); }
-    else if(data._scoresError || r.headers.get('x-refresh-error')){ toast('Scores feed error: '+(data._scoresError||r.headers.get('x-refresh-error')),'err'); }
+    updateAgeLabel();
+    if(data._scoresError || r.headers.get('x-refresh-error')){ toast('Scores feed error: '+(data._scoresError||r.headers.get('x-refresh-error')),'err'); }
   }catch(e){ toast('Could not load','err'); }
 }
-function updateRefreshPill(used, limit){
-  const left = Math.max(0, (limit||20) - (used||0));
-  const pill = document.getElementById('refreshPill');
-  const txt  = document.getElementById('rpText');
-  if(!pill||!txt) return;
-  txt.textContent = left + '/' + (limit||20);
-  pill.classList.toggle('low', left>0 && left<=5);
-  pill.classList.toggle('out', left<=0);
-  pill.title = left>0 ? left+' live score pulls left today (resets at midnight)' : 'No refreshes left today — resets at midnight';
-  const btn=document.getElementById('refreshBtn');
-  if(btn) btn.disabled = (left<=0);
+// Live "Updated Xs ago" label — ticks every second regardless of when the
+// last REAL fetch happened, since auto-refresh polls far more often than
+// the server actually hits Data Golf (see MIN_REFRESH_INTERVAL_MS server-side).
+function updateAgeLabel(){
+  const txt = document.getElementById('rpText');
+  if(!txt) return;
+  if(!STATE.updated_at){ txt.textContent = 'Not yet updated'; return; }
+  const secs = Math.max(0, Math.round((Date.now() - new Date(STATE.updated_at).getTime())/1000));
+  if(secs < 5) txt.textContent = 'Updated just now';
+  else if(secs < 60) txt.textContent = 'Updated '+secs+'s ago';
+  else txt.textContent = 'Updated '+Math.round(secs/60)+'m ago';
 }
+setInterval(updateAgeLabel, 1000);
 function applyState(d){
   if(!d) return;
   dataLoaded=true;
@@ -361,9 +458,7 @@ sb.channel('pool')
   .on('postgres_changes',{event:'UPDATE',schema:'public',table:'pool_state'},
       payload=>{
         applyState(payload.new);
-        const today = new Date().toLocaleDateString('en-CA',{timeZone:'America/Chicago'});
-        const used = (payload.new.refresh_day===today) ? (payload.new.refresh_count||0) : 0;
-        updateRefreshPill(used, 20);
+        updateAgeLabel();
       })
   .subscribe();
 
@@ -379,16 +474,16 @@ function computeStandings(){
   return STATE.owners.map(o=>{
     let total=0,alive=0,mc=0;
     const rows=(o.picks||[]).map(g=>{
-      const sc=scoreFor(g); const isMC=sc&&sc.pos==='MC';
-      const prize=sc?prizeForPos(sc.pos,STATE.purse):0;
+      const sc=scoreFor(g); const tag=doneStatus(sc); const isMC=!!tag;
+      const prize=sc?prizeForGolfer(g):0;
       if(sc){ isMC?mc++:alive++; } total+=prize;
-      return {golfer:g,sc,prize,isMC};
+      return {golfer:g,sc,prize,isMC,tag};
     });
     return {...o,total,alive,mc,rows};
   }).sort((a,b)=>b.total-a.total);
 }
 function fmt(n){return '$'+(n||0).toLocaleString('en-US');}
-function scoreStr(sc){ if(!sc)return '—'; if(sc.pos==='MC')return 'MC'; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
+function scoreStr(sc){ if(!sc)return '—'; const tag=doneStatus(sc); if(tag) return tag; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
 const ROWH = 62;
@@ -429,12 +524,12 @@ function renderBoard(){
   const upd=STATE.updated_at?new Date(STATE.updated_at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'no scores yet';
   const um=document.getElementById('updMeta'); if(um) um.textContent='Updated: '+upd;
   const hint=document.getElementById('lbHint');
-  if(hint) hint.innerHTML=`Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Tap <b>Refresh scores</b> to pull the latest — the counter up top shows how many of the 20 daily pulls are left.`;
+  if(hint) hint.innerHTML=`Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Scores refresh automatically every 10 seconds — tap <b>Refresh scores</b> anytime for an immediate pull.`;
 
   const detail=st.map(o=>{
     const sorted=[...o.rows].sort((a,b)=>b.prize-a.prize||(a.isMC?1:0)-(b.isMC?1:0));
-    const body=sorted.map(r=>`<tr><td class="gname ${r.isMC?'mc':''}">${esc(r.golfer)}${r.isMC?'<span class="mc-tag">MC</span>':''}</td>
-      <td class="c pos">${r.sc?(r.sc.pos==='MC'?'—':r.sc.pos):'—'}</td>
+    const body=sorted.map(r=>`<tr><td class="gname ${r.isMC?'mc':''}">${esc(r.golfer)}${r.isMC?`<span class="mc-tag">${r.tag}</span>`:''}</td>
+      <td class="c pos">${r.sc?(r.isMC?'—':r.sc.pos):'—'}</td>
       <td class="c score" style="${r.isMC?'color:var(--red-soft)':''}">${scoreStr(r.sc)}</td>
       <td class="c prize">${r.prize?fmt(r.prize):'—'}</td></tr>`).join('');
     return `<div class="panel"><div class="panel-head"><h2>${esc(o.name)} <span style="color:var(--muted);font-weight:600">· ${esc(o.team||'')}</span></h2><span class="meta">${fmt(o.total)}</span></div>
@@ -514,11 +609,11 @@ function renderGrid(){
   for(let t=maxT;t>=1;t--){ if(!tiers[t])continue;
     const label=t===maxT?`Picked by all ${maxT}`:(t===1?'Unique — 1 owner':`${t} of ${maxT}`);
     rows+=`<tr class="tier-row ${t===maxT?'t4':t===maxT-1?'t3':''}"><td colspan="${owners.length+3}">${label}</td></tr>`;
-    tiers[t].forEach(g=>{ const sc=scoreFor(g),isMC=sc&&sc.pos==='MC';
+    tiers[t].forEach(g=>{ const sc=scoreFor(g),tag=doneStatus(sc),isMC=!!tag;
       const checks=owners.map(o=>{ const has=(o.picks||[]).some(p=>norm(p)===norm(g));
         return has?`<td class="c"><span class="chk ${isMC?'no-cut':'yes'}">${isMC?'✕':'✓'}</span></td>`:'<td class="c"></td>'; }).join('');
-      rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(g)}${isMC?'<span class="mc-tag">MC</span>':''}</td>
-        <td class="c pos">${sc?(sc.pos==='MC'?'—':sc.pos):'—'}</td>
+      rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(g)}${isMC?`<span class="mc-tag">${tag}</span>`:''}</td>
+        <td class="c pos">${sc?(isMC?'—':sc.pos):'—'}</td>
         <td class="c score" style="${isMC?'color:var(--red-soft)':''}">${scoreStr(sc)}</td>${checks}</tr>`; });
   }
   const head=`<tr><th>Golfer</th><th class="c">Pos</th><th class="c">Score</th>${owners.map(o=>`<th class="c">${esc(o.name)}</th>`).join('')}</tr>`;
@@ -564,6 +659,12 @@ function renderSetup(){
     })()}</div>
     <button class="btn ghost" style="margin-top:10px;font-size:12px" onclick="addPick(${o.id})">+ Add golfer</button></div>`).join('');
   document.getElementById('view-setup').innerHTML=`<div class="panel"><div class="panel-head"><h2>Teams &amp; picks</h2><span class="meta">${STATE.owners.length} owners</span></div>
+    <div class="purse-edit" style="margin:0 0 16px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <label style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.03em">TOURNAMENT PURSE</label>
+      <input class="inp sm" id="purseInput" value="${STATE.purse||''}" placeholder="e.g. 20000000 or 20m" style="max-width:150px">
+      <span style="font-size:12px;color:var(--muted)">Auto-fills from RapidAPI each time the event changes. Override here if it's ever wrong or missing, then Save changes.</span>
+      ${LAST_PURSE_ERROR ? `<div style="width:100%;margin-top:4px;padding:9px 12px;border:1px solid #5a2018;background:rgba(192,57,43,.12);border-radius:9px;color:var(--red-soft);font-weight:600;font-size:12.5px">Auto-purse lookup issue: ${esc(LAST_PURSE_ERROR)} — using the value above until it's fixed or you override it.</div>` : ''}
+    </div>
     <div class="setup">${owners}<button class="btn primary" onclick="addOwner()">+ Add owner</button>
     <button class="btn" style="margin-left:8px" onclick="saveTeams()">Save changes</button></div>
     <div class="hint">Beta: this page is open to everyone with the link — anyone can add or edit any team. Pick each golfer from the dropdown, built from this week's actual tournament field and auto-updating for every major. (If the field hasn't loaded yet, plain text boxes show instead.) You can still tap <b>Fill from screenshot</b> to fill 10 at once. Click <b>Save changes</b> and everyone's board updates live.
@@ -614,24 +715,144 @@ async function saveTeams(){
     const ok = confirm('You are about to save with ZERO teams — this will erase everyone\'s picks. Are you sure?');
     if(!ok) return;
   }
+  // Purse: Data Golf doesn't provide this, so it's entered manually here.
+  // Accepts plain numbers ("20000000") or shorthand millions ("20m").
+  let purse = STATE.purse;
+  const purseEl = document.getElementById('purseInput');
+  const raw = purseEl ? String(purseEl.value||'').trim() : '';
+  if(raw){
+    const mShorthand = /^([\d.]+)\s*m$/i.exec(raw);
+    const parsed = mShorthand ? Math.round(parseFloat(mShorthand[1])*1000000) : parseInt(raw.replace(/[^0-9]/g,''),10);
+    if(!isNaN(parsed) && parsed>0) purse = parsed;
+  }
   try{
     const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({owners:STATE.owners})});
+      body:JSON.stringify({owners:STATE.owners, purse})});
     const d=await r.json();
     if(!r.ok){ toast(d.error||'Save failed','err'); return; }
+    STATE.purse = purse;
     builtSig=''; // owners may have changed; rebuild board shell next time
+    render(); // reflect the new purse immediately, without waiting for the next poll
     toast('Saved — everyone\'s board updated');
   }catch(e){ toast('Save failed','err'); }
+}
+
+/* =================== VERIFY PAYOUTS =================== */
+// Cross-checks our own live-computed standings against two independent
+// sources once the tournament is over. IMPORTANT: this is a second opinion,
+// not a guarantee — a "match" means two-to-three independent sources agree,
+// which is strong reassurance, but no automated check can promise zero
+// mistakes. Always worth a quick glance at the official leaderboard too,
+// especially the first few times this runs for real money.
+function posNumeric(pos){
+  if(pos==null) return null;
+  const s=String(pos).toUpperCase();
+  if(/MC|CUT|WD|DQ/.test(s)) return 'MC';
+  const n=parseInt(s.replace(/[^0-9]/g,''),10);
+  return isNaN(n)?null:n;
+}
+async function openVerifyModal(){
+  document.getElementById('verifyModal').style.display='flex';
+  const body=document.getElementById('verifyBody');
+  body.innerHTML='<p style="color:var(--muted)">Fetching official results from Data Golf and RapidAPI…</p>';
+  try{
+    const r=await fetch('/api/verify');
+    const d=await r.json();
+    renderVerifyReport(d);
+  }catch(e){
+    body.innerHTML=`<p style="color:var(--red-soft)">Could not load verification data: ${esc(e.message)}</p>`;
+  }
+}
+function closeVerifyModal(){ document.getElementById('verifyModal').style.display='none'; }
+
+function renderVerifyReport(d){
+  const body=document.getElementById('verifyBody');
+  const golferSet=new Set();
+  STATE.owners.forEach(o=>(o.picks||[]).forEach(g=>{ if(g) golferSet.add(g); }));
+  const golfers=[...golferSet];
+
+  let mismatches=0, checked=0;
+  const rows = golfers.map(g=>{
+    const sc = scoreFor(g);
+    const ourPos = sc ? sc.pos : null;
+    const ourPrize = sc ? prizeForGolfer(g) : 0;
+    let officialEntry=null, rapidEntry=null;
+    if(d.official_rows){ for(const k of nameKeys(g)){ if(d.official_rows[k]){ officialEntry=d.official_rows[k]; break; } } }
+    if(d.rapid_rows){ for(const k of nameKeys(g)){ if(d.rapid_rows[k]){ rapidEntry=d.rapid_rows[k]; break; } } }
+
+    let status='nodata', note='';
+    const ourP = posNumeric(ourPos);
+    if(officialEntry || rapidEntry){
+      checked++;
+      const offP = officialEntry ? posNumeric(officialEntry.pos) : null;
+      const rapP = rapidEntry ? posNumeric(rapidEntry.pos) : null;
+      const knownPositions = [ourP,offP,rapP].filter(x=>x!=null);
+      const allPosMatch = knownPositions.every(x=>x===knownPositions[0]);
+      let prizeOk=true;
+      if(officialEntry && officialEntry.earnings!=null && ourPrize){
+        const diff=Math.abs(officialEntry.earnings-ourPrize);
+        prizeOk = diff <= Math.max(2000, ourPrize*0.03); // small tolerance for rounding conventions
+      }
+      if(allPosMatch && prizeOk){ status='match'; }
+      else { status='mismatch'; mismatches++; note = !allPosMatch ? 'Position disagreement' : 'Prize amount differs'; }
+    }
+    return {golfer:g, ourPos, ourPrize, officialEntry, rapidEntry, status, note};
+  });
+
+  const sourceNotes=[];
+  if(d.official_diag) sourceNotes.push('Data Golf official earnings: '+d.official_diag);
+  else if(d.official_matched_name) sourceNotes.push(`Data Golf official earnings: matched "${d.official_matched_name}" ✓`);
+  if(d.rapid_diag) sourceNotes.push('RapidAPI final leaderboard: '+d.rapid_diag);
+  else if(d.rapid_matched_name) sourceNotes.push(`RapidAPI final leaderboard: matched "${d.rapid_matched_name}" ✓`);
+
+  let banner;
+  if(checked===0){
+    banner = `<div class="verify-banner warn">No independent source could be matched for "${esc(d.event_name||'this event')}" yet. Don't treat this as verified — check the tournament's official leaderboard/payout page manually before settling real money.</div>`;
+  } else if(mismatches===0){
+    banner = `<div class="verify-banner ok">✓ All ${checked} checked golfers agree with at least one independent source. Still worth a quick manual glance for real money, but no discrepancies found.</div>`;
+  } else {
+    banner = `<div class="verify-banner warn">⚠ ${mismatches} of ${checked} checked golfers disagree with an independent source — review these carefully before paying out.</div>`;
+  }
+
+  const tableRows = rows.map(r=>`<tr>
+    <td>${esc(r.golfer)}</td>
+    <td>${esc(r.ourPos||'—')} / ${r.ourPrize?fmt(r.ourPrize):'—'}</td>
+    <td>${r.officialEntry?esc(r.officialEntry.pos||'—')+' / '+(r.officialEntry.earnings!=null?fmt(r.officialEntry.earnings):'—'):'—'}</td>
+    <td>${r.rapidEntry?esc(r.rapidEntry.pos||'—'):'—'}</td>
+    <td><span class="verify-tag ${r.status}">${r.status==='match'?'Match':r.status==='mismatch'?'Mismatch':'No data'}</span>${r.note?` <span style="color:var(--muted);font-size:11px">${esc(r.note)}</span>`:''}</td>
+  </tr>`).join('');
+
+  body.innerHTML = `
+    ${banner}
+    <div class="verify-source-note">
+      ${sourceNotes.map(esc).join('<br>')}<br><br>
+      Checks every golfer on someone's team against Data Golf's official post-tournament earnings and RapidAPI's independent final leaderboard. Small prize differences (a few thousand dollars) are treated as rounding, not a mismatch.
+    </div>
+    <table class="verify-table">
+      <thead><tr><th>Golfer</th><th>Our pos / prize</th><th>Official pos / earnings</th><th>RapidAPI pos</th><th>Status</th></tr></thead>
+      <tbody>${tableRows || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No teams set yet.</td></tr>'}</tbody>
+    </table>
+  `;
 }
 
 /* =================== REFRESH =================== */
 async function manualRefresh(){
   const b=document.getElementById('refreshBtn');
-  if(b.disabled) return;
-  b.classList.add('spin');
+  if(b.disabled) return; // guards against overlap (auto-timer + a manual click racing)
+  b.disabled = true; b.classList.add('spin');
   await loadState(true);
-  b.classList.remove('spin');
+  b.disabled = false; b.classList.remove('spin');
 }
+// Auto-refresh every 10s for a live-feeling leaderboard. The server enforces
+// its own minimum interval between REAL upstream calls (shared across every
+// visitor), so polling from the browser this often is safe even with several
+// people on the page at once — most polls just return the cached state fast.
+let autoTimer = null;
+function startAutoRefresh(){
+  if(autoTimer) return;
+  autoTimer = setInterval(()=>{ if(!document.hidden) manualRefresh(); }, 10000);
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) manualRefresh(); });
 
 let toastT;
 function toast(m,t){ const el=document.getElementById('toast'); el.textContent=m; el.className='toast show'+(t==='err'?' err':''); clearTimeout(toastT); toastT=setTimeout(()=>el.className='toast', t==='err'?7000:2600); }
@@ -639,7 +860,8 @@ function toast(m,t){ const el=document.getElementById('toast'); el.textContent=m
 /* =================== INIT =================== */
 // Teams tab is visible to everyone during the beta — nothing to toggle here.
 applyTheme();
-loadState(false);
+manualRefresh();
+startAutoRefresh();
 </script>
 </body>
 </html>

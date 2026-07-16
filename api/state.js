@@ -22,101 +22,83 @@ function norm(name) {
     .replace(/[^a-z ]/g,'').replace(/\s+/g,' ').trim();
 }
 
-// ---- Live Golf Data feed (RapidAPI) ----
-// Docs: https://rapidapi.com/slashgolf/api/live-golf-data
-// Free tier is plenty for one pool.
+// ---- RapidAPI Live Golf Data — reintroduced, but ONLY for purse lookup ----
+// Data Golf doesn't provide purse amounts, so this fills that one gap and
+// nothing else. It's best-effort and non-blocking: any failure here just
+// leaves the purse as whatever it already was (manually entered or last
+// successfully fetched) — it can never break scores, breakfast odds, or the
+// field list, since those are entirely Data Golf now.
+//
+// Crucially, this does NOT bring back date-window tournament matching (the
+// source of the old "wrong tournament" bug). We already know the exact event
+// name from Data Golf's live feed, so this just looks for a schedule entry
+// whose NAME matches that — a much simpler and more robust lookup than
+// guessing which of several same-week events is "the real one" from dates.
 const RAPID_HOST = 'live-golf-data.p.rapidapi.com';
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// Some errors are transient provider-side blips (RapidAPI/slashgolf under heavy
-// major-championship traffic) rather than real problems — worth a quick retry.
-function isTransientStatus(status, bodyText) {
-  if (status >= 500) return true;
-  if (status === 403 || status === 405) {
-    // "The API provider has disabled request access" is their generic
-    // overload/glitch message — treat it as transient and retry.
-    return /disabled request access/i.test(bodyText || '');
-  }
-  return false;
+function normName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
 }
-
-async function rapid(path, attempt = 1) {
-  const res = await fetch(`https://${RAPID_HOST}${path}`, {
-    headers: {
-      'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-      'x-rapidapi-host': RAPID_HOST,
-    },
-  });
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => '');
-    if (attempt < 3 && isTransientStatus(res.status, bodyText)) {
-      await sleep(400 * attempt); // brief backoff, then retry
-      return rapid(path, attempt + 1);
-    }
-    throw new Error(`feed ${res.status} on ${path} (after ${attempt} attempt${attempt>1?'s':''}) :: ${bodyText.slice(0,200)}`);
-  }
-  return res.json();
+// Similarity score in [0,1]; 0 means "not a real match". Deliberately strict:
+// a single shared generic word ("open", "championship", "classic") between two
+// otherwise-different tournament names must NOT count as a match — that's
+// exactly the kind of false positive that caused the original wrong-tournament
+// bug, just relocated from date-matching into name-matching if left loose.
+function nameSimilarity(a, b) {
+  const na = normName(a), nb = normName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.95;
+  const wa = na.split(' ').filter(w => w.length > 2);
+  const wb = nb.split(' ').filter(w => w.length > 2);
+  if (!wa.length || !wb.length) return 0;
+  const [shorter, longer] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
+  if (shorter.length < 2) return 0; // one shared word alone is never enough evidence
+  const longerSet = new Set(longer);
+  const overlap = shorter.filter(w => longerSet.has(w)).length;
+  const minOverlapNeeded = Math.max(2, Math.ceil(shorter.length * 0.6));
+  if (overlap < minOverlapNeeded) return 0;
+  return overlap / shorter.length;
 }
-
-// Find the current/most-recent event from the season schedule
-// Majors always outrank any concurrent "opposite field" or feeder-tour event
-// that happens to share the same calendar week.
-function isMajorName(name) {
-  const n = String(name || '').toLowerCase();
-  return /open championship|the open\b|masters|pga championship|u\.?s\.? open/.test(n);
-}
-
-async function currentEvent() {
-  const year = new Date().getFullYear();
-  const sched = await rapid(`/schedule?orgId=1&year=${year}`);
-  const events = sched?.schedule || [];
-  const now = Date.now();
-  // Collect every event whose window contains "now" — there can be more than one
-  // (a major + its opposite-field/feeder event often share identical dates).
-  const inWindow = [];
-  let upcoming = null, upStart = Infinity;
+// Picks the single BEST-scoring schedule entry, not just the first one that
+// clears some threshold — safer when several events share a word by chance.
+function findBestScheduleMatch(events, eventName) {
+  let best = null, bestScore = 0;
   for (const e of events) {
-    const start = new Date(e.date?.start || e.startDate || 0).getTime();
-    const end   = new Date(e.date?.end   || e.endDate   || start + 4*864e5).getTime();
-    if (now >= start - 2*864e5 && now <= end + 1*864e5) { // in-window (with pad)
-      inWindow.push({ e, start });
+    const score = nameSimilarity(e.name, eventName);
+    if (score > bestScore) { bestScore = score; best = e; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// Returns { purse: number|null, matchedName: string|null, diag: string|null }
+async function fetchPurseFromRapid(eventName) {
+  const key = process.env.RAPIDAPI_KEY;
+  if (!key) return { purse: null, matchedName: null, diag: null }; // not configured — silently skip
+  if (!eventName) return { purse: null, matchedName: null, diag: null };
+  try {
+    const year = new Date().getFullYear();
+    const res = await fetch(`https://${RAPID_HOST}/schedule?orgId=1&year=${year}`, {
+      headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': RAPID_HOST },
+    });
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '');
+      return { purse: null, matchedName: null, diag: `RapidAPI purse lookup failed: HTTP ${res.status} ${bodyText.slice(0,150)}` };
     }
-    if (start > now && start < upStart) { upStart = start; upcoming = e; }
-  }
-  let chosen = null;
-  if (inWindow.length) {
-    // Prefer a major by name; otherwise take the one with the latest start.
-    const major = inWindow.find(x => isMajorName(x.e.name));
-    chosen = major ? major.e : inWindow.reduce((a, b) => (b.start > a.start ? b : a)).e;
-  }
-  const result = chosen || upcoming || events[events.length-1] || null;
-  // Diagnostic breadcrumb: every candidate that was in-window this week, so a
-  // wrong pick shows *why* right in the error message instead of another round trip.
-  const candidates = inWindow.map(x => `${x.e.name || '?'} (id ${x.e.tournId || x.e.id || '?'})`);
-
-  // Deeper diagnostic: if nothing was in-window, dump the RAW event object for
-  // any major-named event, whole — so we see the real field names/shapes the
-  // feed actually uses instead of guessing at date.start/startDate again.
-  // (Never call toISOString() on a maybe-invalid date — that itself throws.)
-  function safeIso(ms) {
-    return Number.isFinite(ms) ? new Date(ms).toISOString() : `INVALID(raw=${ms})`;
-  }
-  let majorDebug = null;
-  if (!inWindow.length) {
-    const anyMajor = events.find(e => isMajorName(e.name));
-    if (anyMajor) {
-      const raw = JSON.stringify(anyMajor).slice(0, 500);
-      const s = new Date(anyMajor.date?.start || anyMajor.startDate || 0).getTime();
-      const eEnd = new Date(anyMajor.date?.end || anyMajor.endDate || 0).getTime();
-      majorDebug = `found "${anyMajor.name}" but NOT in-window — FULL raw object: ${raw} :: parsed start=${safeIso(s)} end=${safeIso(eEnd)} vs now=${safeIso(now)}`;
-    } else {
-      majorDebug = `no event matching isMajorName() found anywhere in ${events.length} schedule entries for year=${year}`;
+    const data = await res.json();
+    const events = data?.schedule || [];
+    const match = findBestScheduleMatch(events, eventName);
+    if (!match) {
+      return { purse: null, matchedName: null, diag: `No RapidAPI schedule entry matched "${eventName}" among ${events.length} events this year` };
     }
-
+    const purse = Number(String(match.purse || '').replace(/[^0-9]/g,''));
+    if (!purse) {
+      return { purse: null, matchedName: match.name, diag: `Matched "${match.name}" but its purse field was empty/unparseable: ${JSON.stringify(match.purse)}` };
+    }
+    return { purse, matchedName: match.name, diag: null };
+  } catch (e) {
+    return { purse: null, matchedName: null, diag: 'RapidAPI purse lookup threw: ' + e.message };
   }
-
-  return { event: result, candidates, usedFallback: !inWindow.length, majorDebug };
 }
 
 function parToInt(p) {
@@ -164,20 +146,29 @@ async function fetchFieldList() {
   }
 }
 
-// ---- Data Golf: live finish-probability model ----
-// Returns { live: bool, players: { normName: {win,top5,top10,top20,make_cut, thru, finished} } }
-// LIVE ONLY — uses the in-play model. No pre-tournament odds (we only care once play starts).
-async function fetchDataGolfProbs() {
+// ---- Data Golf: live finish-probability model + live leaderboard scores ----
+// ONE call to Data Golf's in-play feed now powers both the breakfast simulation
+// (win/top5/etc probabilities) AND the leaderboard (pos/score) — replacing the
+// separate RapidAPI schedule+leaderboard pipeline entirely. This feed is
+// inherently scoped to "this week's event," so there's no tournament-picking
+// logic needed at all.
+// Returns { live, players: {...}, scores: {normName:{pos,score}}, eventName, finalRound, diag }
+async function fetchDataGolfLive() {
   const key = process.env.DATAGOLF_KEY;
-  if (!key) return { live:false, players:{} };
+  if (!key) return { live:false, players:{}, scores:{}, eventName:null, diag:'DATAGOLF_KEY is not set on the server' };
   const url = `https://feeds.datagolf.com/preds/in-play?tour=pga&dead_heat=no&odds_format=percent&file_format=json&key=${key}`;
   try {
     const r = await fetch(url);
-    if (!r.ok) return { live:false, players:{} };
+    if (!r.ok) {
+      const bodyText = await r.text().catch(() => '');
+      return { live:false, players:{}, scores:{}, eventName:null, diag:`Data Golf in-play request failed: HTTP ${r.status} ${bodyText.slice(0,200)}` };
+    }
     const data = await r.json();
     const rows = data?.data || data?.players || [];
-    // The in-play feed only returns rows once the tournament is underway.
-    if (!Array.isArray(rows) || !rows.length) return { live:false, players:{} };
+    const eventName = data?.event_name || data?.info?.event_name || null;
+    // The in-play feed only returns rows once the tournament is underway —
+    // that's a real "not live yet" state, not an error.
+    if (!Array.isArray(rows) || !rows.length) return { live:false, players:{}, scores:{}, eventName, diag:null };
     const num = v => {
       if (v == null) return undefined;
       let x = typeof v === 'string' ? parseFloat(String(v).replace('%','')) : v;
@@ -185,24 +176,58 @@ async function fetchDataGolfProbs() {
       return x > 1 ? x/100 : x; // percent -> 0..1
     };
     const players = {};
+    const scores = {};
     let maxRound = 4;
     for (const p of rows) {
       const nm = p.player_name || p.name;
       if (!nm) continue;
+      const full = toFirstLast(nm);
+      const key = norm(full);
       // "thru" = holes completed this round; round/round_completed vary by feed version
       const thru = p.thru != null ? p.thru : (p.holes_thru != null ? p.holes_thru : null);
       const rd = p.round != null ? Number(p.round) : null;
       if (rd != null && rd > maxRound) maxRound = rd;
-      players[norm(nm)] = {
+      const rawPos = p.current_pos != null ? p.current_pos : (p.position != null ? p.position : null);
+      players[key] = {
         win:num(p.win), top5:num(p.top_5), top10:num(p.top_10),
         top20:num(p.top_20), make_cut:num(p.make_cut),
         thru, round: rd,
-        currentPos: p.current_pos != null ? p.current_pos : (p.position != null ? p.position : null),
+        currentPos: rawPos,
       };
+      // ---- leaderboard pos/score, self-contained (no separate feed needed) ----
+      // Real tour payout rules, matched here:
+      //  - CUT (missed the 36-hole cut): no money.
+      //  - DQ (disqualified): no money, no exceptions.
+      //  - WD (withdrew): no money if it happened before making the cut (same
+      //    as CUT); but a withdrawal during round 3+ means they'd already made
+      //    the cut, and real tours still pay that out — specifically last-place
+      //    money, not their position at the moment they left. Round 3+ is a
+      //    reliable signal since only cut-qualifiers get a round 3/4 tee time.
+      const posStr = String(rawPos ?? '').toUpperCase();
+      if (/DQ/.test(posStr)) {
+        scores[key] = { pos: 'DQ', score: 'DQ' };
+      } else if (/WD/.test(posStr)) {
+        const madeCutBeforeWD = rd != null && rd >= 3;
+        scores[key] = madeCutBeforeWD ? { pos: 'WD_PAID', score: 'WD_PAID' } : { pos: 'MC', score: 'MC' };
+      } else if (/CUT/.test(posStr)) {
+        scores[key] = { pos: 'MC', score: 'MC' };
+      } else {
+        const rawScore = p.current_score ?? p.score ?? p.total_to_par ?? p.total;
+        scores[key] = { pos: rawPos != null ? String(rawPos) : '', score: parToInt(rawScore) };
+      }
     }
-    return { live:true, players, finalRound: maxRound };
+    // Diagnostic: if we got rows but couldn't extract a single usable score,
+    // the field names guessed above (current_score/score/etc) are wrong for
+    // this feed version — dump one raw row so the real shape is obvious
+    // immediately instead of another guessing round.
+    let diag = null;
+    const anyScore = Object.values(scores).some(s => s.score !== null && s.score !== undefined);
+    if (rows.length && !anyScore) {
+      diag = `got ${rows.length} in-play rows but no parsable score field — raw sample row: ${JSON.stringify(rows[0]).slice(0,400)}`;
+    }
+    return { live:true, players, scores, eventName, finalRound: maxRound, diag };
   } catch (e) {
-    return { live:false, players:{} };
+    return { live:false, players:{}, scores:{}, eventName:null, diag:'Data Golf in-play request threw: ' + e.message };
   }
 }
 
@@ -254,8 +279,9 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
 
   uniq.forEach(k => {
     const sc = scores ? scores[k] : null;
-    if (sc && sc.pos === 'MC') { frozen[k] = 0; return; }            // missed cut -> $0, fixed
-    if (eventFinal && sc && sc.pos && sc.pos !== 'MC') {              // event over -> real prize, fixed
+    if (sc && (sc.pos === 'MC' || sc.pos === 'DQ')) { frozen[k] = 0; return; } // missed cut or DQ -> $0, fixed
+    if (sc && sc.pos === 'WD_PAID') { frozen[k] = prizeFn(9999); return; }     // withdrew after making cut -> approx last-place money, fixed
+    if (eventFinal && sc && sc.pos) {                                          // event over -> real prize, fixed
       frozen[k] = prizeFn(parseInt(String(sc.pos).replace(/[^0-9]/g,''),10));
       return;
     }
@@ -267,7 +293,7 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
     const doneThisGolfer =
       dgRow && dgRow.round != null && dgRow.thru != null &&
       Number(dgRow.round) >= finalRound && Number(dgRow.thru) >= 18;
-    if (doneThisGolfer && sc && sc.pos && sc.pos !== 'MC') {
+    if (doneThisGolfer && sc && sc.pos) {
       frozen[k] = prizeFn(parseInt(String(sc.pos).replace(/[^0-9]/g,''),10));
       return;
     }
@@ -320,36 +346,12 @@ function prizeByPos(purse) {
   };
 }
 
-// Pull the leaderboard for an event and build {normName:{pos,score}}
-async function fetchScores(eventId, year) {
-  const lb = await rapid(`/leaderboard?orgId=1&tournId=${eventId}&year=${year}`);
-  const rows = lb?.leaderboardRows || lb?.leaderboard || [];
-  const scores = {};
-  for (const r of rows) {
-    const first = r.firstName || '';
-    const last  = r.lastName  || '';
-    const full  = (first && last) ? `${first} ${last}` : (r.playerName || r.name || '');
-    if (!full) continue;
-    const status = (r.status || '').toUpperCase();
-    let pos = r.position || r.pos || '';
-    let score;
-    if (status === 'CUT' || status === 'MC' || /cut/i.test(pos)) {
-      pos = 'MC'; score = 'MC';
-    } else if (status === 'WD' || status === 'DQ') {
-      pos = 'MC'; score = 'MC';
-    } else {
-      score = parToInt(r.total ?? r.totalToPar ?? r.score);
-    }
-    scores[norm(full)] = { pos: String(pos).replace('T','T'), score };
-  }
-  return scores;
-}
-
-const DAILY_LIMIT = 20;
-// "today" in US Central time so the reset lines up with the golf day
-function todayStr(){
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); // YYYY-MM-DD
-}
+// Minimum time between REAL upstream Data Golf calls, enforced server-side and
+// shared across every visitor. A client can poll as often as it wants (e.g.
+// every 10s for a live-feeling leaderboard); this gate is what actually
+// protects the Data Golf quota when multiple people have the page open at
+// once, since it's checked against the one shared Supabase row, not per-client.
+const MIN_REFRESH_INTERVAL_MS = 15000;
 
 export default async function handler(req, res) {
   try {
@@ -359,74 +361,71 @@ export default async function handler(req, res) {
     let { data: state } = await supabase
       .from('pool_state').select('*').eq('id','main').single();
 
-    // ---- daily counter bookkeeping ----
-    const today = todayStr();
-    let used = state?.refresh_count || 0;
     let fieldErrorOut = null; // surfaced to the UI so field-fetch problems are self-diagnosing
     let scoresErrorOut = null; // surfaced to the UI so scores-fetch problems are self-diagnosing
-    if ((state?.refresh_day || '') !== today) { used = 0; } // new day -> reset
-    let remaining = Math.max(0, DAILY_LIMIT - used);
+    let purseErrorOut = null; // surfaced to the UI so purse-lookup problems are self-diagnosing
 
-    if (wantRefresh) {
-      // ---- 1) Live scores + event detection (RapidAPI). Independent — can fail on its own. ----
+    const lastUpdatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
+    const ageMs = Date.now() - lastUpdatedMs;
+    const dueForRealFetch = ageMs >= MIN_REFRESH_INTERVAL_MS;
+
+    if (wantRefresh && dueForRealFetch) {
+      // ---- 1) Live scores + breakfast odds — ONE Data Golf call, LIVE ONLY. ----
+      // This feed is inherently scoped to "this week's event" (no schedule
+      // lookup, no picking between overlapping tournaments — that whole class
+      // of bug is gone by construction, not by patching).
       let scores = state?.scores || {};
       let purse = state?.purse || 22500000;
+      let purseEventName = state?.purse_event_name || null;
       let eventName = state?.event_name;
-      let eventId = state?.event_id;
-      let ev = null;
-      const canPullScores = process.env.RAPIDAPI_KEY && remaining > 0;
+      let breakfast = state?.breakfast || {};
 
-      if (process.env.RAPIDAPI_KEY && remaining <= 0) {
-        res.setHeader('x-refresh-blocked', '1');
-      } else if (canPullScores) {
-        let candidates = [];
-        let majorDebug = null;
+      if (!process.env.DATAGOLF_KEY) {
+        // no key configured — nothing to do, leave prior state as-is
+      } else {
         try {
-          const year = new Date().getFullYear();
-          const picked = await currentEvent();
-          ev = picked.event;
-          candidates = picked.candidates;
-          majorDebug = picked.majorDebug;
-          if (ev) {
-            const evId = ev.tournId || ev.id;
-            try {
-              scores = await fetchScores(evId, year);
-              eventId = String(evId);
-              eventName = ev.name || eventName;
-              purse = Number(String(ev.purse||'').replace(/[^0-9]/g,'')) || purse;
-              used += 1;
-              remaining = Math.max(0, DAILY_LIMIT - used);
-            } catch (e) {
-              // Leaderboard fetch failed for the chosen event — show exactly which
-              // event was picked, every alternative candidate this week, and (if
-              // nothing was in-window) the real major event's raw date fields —
-              // so a wrong-tournament pick is obvious immediately, not another guess.
-              const picked_txt = `${ev.name || '?'} (id ${evId})`;
-              const alt_txt = candidates.length ? ` | week's candidates: ${candidates.join(', ')}` : (majorDebug ? ` | ${majorDebug}` : '');
-              throw new Error(`${e.message} :: picked "${picked_txt}"${alt_txt}`);
-            }
+          const dg = await fetchDataGolfLive();
+          if (dg.diag) {
+            // Surface real problems (bad key, feed shape mismatch) without
+            // blocking the rest of the refresh — field list still updates below.
+            scoresErrorOut = dg.diag;
+            res.setHeader('x-refresh-error', dg.diag);
           }
+          if (dg.eventName) eventName = dg.eventName;
+          if (dg.live) {
+            scores = dg.scores;
+            // eventFinal isn't directly knowable from this feed (no explicit
+            // "status" field); per-golfer freezing inside simulateBreakfast
+            // already converges to the exact result as each golfer completes,
+            // so we don't need a separate whole-event "final" flag here.
+            breakfast = simulateBreakfast(state?.owners || [], dg, scores, prizeByPos(purse), false);
+          }
+          // if !dg.live: tournament hasn't started yet (or feed is momentarily
+          // empty) — leave prior scores/breakfast as-is rather than blanking them.
         } catch (e) {
           scoresErrorOut = e.message;
           res.setHeader('x-refresh-error', e.message);
         }
       }
 
-      // ---- 2) Breakfast watch — Data Golf, LIVE ONLY. Independent of the scores fetch above. ----
-      let breakfast = state?.breakfast || {};
-      try {
-        const dg = await fetchDataGolfProbs();
-        const eventFinal = (ev && ev.status && /final|complete|official/i.test(String(ev.status))) ? true : false;
-        if (dg.live || eventFinal) {
-          breakfast = simulateBreakfast(state?.owners || [], dg, scores, prizeByPos(purse), eventFinal);
-        } else if (!ev) {
-          // couldn't confirm event state this refresh — leave prior breakfast odds as-is
-        } else {
-          breakfast = {}; // not started yet -> no breakfast watch
+      // ---- 1b) Purse — RapidAPI, best-effort, ONLY when the event has changed. ----
+      // Purses don't move mid-tournament, so there's no reason to hit RapidAPI
+      // every refresh — only when this week's event differs from whichever
+      // event we last successfully resolved a purse for. Any failure here just
+      // leaves the existing purse (manually entered or previously fetched) —
+      // never blocks scores/breakfast/field, which are all Data Golf already.
+      if (eventName && eventName !== purseEventName) {
+        const pr = await fetchPurseFromRapid(eventName);
+        if (pr.purse) {
+          purse = pr.purse;
+          purseEventName = eventName;
+        } else if (pr.diag) {
+          purseErrorOut = pr.diag;
+          res.setHeader('x-purse-error', pr.diag);
         }
-      } catch (e) { /* keep prior odds if the sim/feed fails */ }
+      }
 
-      // ---- 3) Tournament field — Data Golf. Fully independent; always attempted on refresh. ----
+      // ---- 2) Tournament field — Data Golf. Fully independent; always attempted alongside. ----
       // Auto-updates for whichever event is live: majors, regular tour stops, all of it.
       let field = state?.field || [];
       try {
@@ -438,26 +437,23 @@ export default async function handler(req, res) {
 
       const patch = {
         event_name: eventName,
-        event_id:  eventId,
         purse,
+        purse_event_name: purseEventName,
         scores,
         breakfast,
         field,
-        refresh_count: used,
-        refresh_day: today,
         updated_at: new Date().toISOString(),
       };
       await supabase.from('pool_state').update(patch).eq('id','main');
       state = { ...state, ...patch };
     }
+    // else: either not asking to refresh, or a real fetch happened elsewhere
+    // within the last MIN_REFRESH_INTERVAL_MS — just serve the current shared
+    // state, no upstream call at all. Cheap, and keeps polling clients in sync
+    // with each other and with whatever the last real fetch produced.
 
-    // expose the counter to the page on every response
-    res.setHeader('x-refresh-used', String(used));
-    res.setHeader('x-refresh-limit', String(DAILY_LIMIT));
-    res.setHeader('x-refresh-remaining', String(remaining));
     res.setHeader('Cache-Control','no-store');
-    // also include in the body so realtime/initial load can read it
-    return res.status(200).json({ ...(state||{}), _refreshUsed: used, _refreshLimit: DAILY_LIMIT, _refreshDay: today, _fieldError: fieldErrorOut, _scoresError: scoresErrorOut });
+    return res.status(200).json({ ...(state||{}), _fieldError: fieldErrorOut, _scoresError: scoresErrorOut, _purseError: purseErrorOut });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
