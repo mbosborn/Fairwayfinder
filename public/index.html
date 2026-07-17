@@ -461,7 +461,7 @@ function buildPrizeMap(){
   for(const [nm,s] of Object.entries(scores)){
     if(!s) continue;
     if(s.pos==='WD_PAID'){ wdPaidNames.push(nm); continue; }
-    if(s.pos==='MC' || s.pos==='DQ' || s.score==null || typeof s.score!=='number') continue;
+    if(s.pos==='MC' || s.pos==='DQ' || s.pos==='WD_OUT' || s.score==null || typeof s.score!=='number') continue;
     (groups[s.score]=groups[s.score]||[]).push(nm);
   }
   const sortedScores=Object.keys(groups).map(Number).sort((a,b)=>a-b); // best (lowest) first
@@ -562,6 +562,7 @@ function doneStatus(sc){
   if(sc.pos==='MC') return 'MC';
   if(sc.pos==='DQ') return 'DQ';
   if(sc.pos==='WD_PAID') return 'WD';
+  if(sc.pos==='WD_OUT') return 'WD';
   return null;
 }
 
@@ -824,18 +825,25 @@ function renderBoard(){
   const cutHappened=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
   const cutDividerRow=(kind,score)=>cutDividerRowHTML(kind,score,4);
 
+  // Tie order, standardized: golfers tied on score sort by the live feed's own
+  // ordering — the exact order the Real Leaderboard shows — so the same tied
+  // golfers appear in the same order on every team's table, instead of in
+  // whatever order each owner happened to enter their picks.
+  const FEEDIDX={}; Object.keys(STATE.scores||{}).forEach((k,i)=>FEEDIDX[k]=i);
+  const feedIdx=(g)=>{ for(const k of nameKeys(g)){ if(STATE.scores&&STATE.scores[k]!==undefined&&FEEDIDX[k]!==undefined) return FEEDIDX[k]; } return 99999; };
+
   const detail=st.map(o=>{
     const sorted=[...o.rows].sort((a,b)=>{
       // Done (missed cut / DQ / withdrew) always sinks below anyone still live,
       // regardless of prize amount — matches a real leaderboard's shape.
       if(a.isMC!==b.isMC) return a.isMC?1:-1;
-      if(a.isMC && b.isMC) return 0; // both done — relative order doesn't matter
-      // Both still live: sort by actual score, best (lowest) first. This is the
-      // real fix — sorting by prize alone left ties (very common, since payout
-      // brackets are broad) in arbitrary order instead of true score order.
+      // Both done: alphabetical, matching the Real Leaderboard's done section.
+      if(a.isMC && b.isMC) return String((a.sc&&a.sc.name)||a.golfer).localeCompare(String((b.sc&&b.sc.name)||b.golfer));
+      // Both still live: by score (best first), then by feed order for ties.
       const as=(a.sc && typeof a.sc.score==='number')?a.sc.score:Infinity;
       const bs=(b.sc && typeof b.sc.score==='number')?b.sc.score:Infinity;
-      return as-bs;
+      if(as!==bs) return as-bs;
+      return feedIdx(a.golfer)-feedIdx(b.golfer);
     });
     let body='', dividerDone=false;
     sorted.forEach((r,i)=>{
@@ -953,13 +961,14 @@ function renderReal(){
   const pickedKeys=new Set();
   STATE.owners.forEach(o=>(o.picks||[]).forEach(p=>{ nameKeys(p).forEach(k=>pickedKeys.add(k)); }));
 
-  const entries=Object.entries(scores).map(([key,sc])=>({key,sc,tag:doneStatus(sc)}));
+  const entries=Object.entries(scores).map(([key,sc],idx)=>({key,sc,tag:doneStatus(sc),idx}));
   entries.sort((a,b)=>{
     if(!!a.tag!==!!b.tag) return a.tag?1:-1; // done (MC/DQ/WD) sinks to bottom
     if(a.tag&&b.tag) return (a.sc.name||'').localeCompare(b.sc.name||'');
     const as=typeof a.sc.score==='number'?a.sc.score:9999;
     const bs=typeof b.sc.score==='number'?b.sc.score:9999;
-    return as-bs;
+    if(as!==bs) return as-bs;
+    return a.idx-b.idx; // ties: the feed's own order — same rule as team tables
   });
 
   // Same cut divider as the Pick 'Em tables: gold dashed projected line

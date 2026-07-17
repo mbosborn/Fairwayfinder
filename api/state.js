@@ -235,6 +235,44 @@ async function resolvePurse(eventName) {
   return { purse: null, source: null, diag: diags.join(' | ') };
 }
 
+// How many players (plus ties) make the cut — varies by tournament.
+// (Mirrors the front-end's cutTopN; kept server-side for the synthetic cut.)
+function serverCutTopN(eventName) {
+  const n = String(eventName || '').toLowerCase();
+  if (/masters/.test(n)) return 50;
+  if (/pga championship/.test(n)) return 70;
+  if (/u\.?s\.? open/.test(n)) return 60;
+  if (/open championship|the open\b/.test(n)) return 70;
+  return 65; // standard PGA Tour cut
+}
+
+// If 36 holes are complete and the feed hasn't marked anyone CUT, apply the
+// cut ourselves (mutates `scores` in place). Conditions, deliberately strict:
+//  - nobody is already MC (feed-marked cuts always win over this),
+//  - every live scored golfer has finished round 2 (round>=3, or round 2 with
+//    18 holes played) — i.e. this can't fire mid-round,
+//  - there are enough scored golfers for a cut to even exist.
+function applySyntheticCutIfDue(scores, eventName) {
+  const entries = Object.values(scores);
+  if (entries.some(s => s && s.pos === 'MC')) return; // feed already marked it
+  const live = entries.filter(s => s && typeof s.score === 'number' &&
+    s.pos !== 'DQ' && s.pos !== 'WD_PAID' && s.pos !== 'WD_OUT');
+  const N = serverCutTopN(eventName);
+  if (live.length <= N) return; // no cut possible/needed
+  const r2Done = live.every(s => (s.round != null) &&
+    (Number(s.round) >= 3 || (Number(s.round) >= 2 && s.thru != null && Number(s.thru) >= 18)));
+  if (!r2Done) return;
+  const sorted = live.map(s => s.score).sort((a, b) => a - b);
+  const cutScore = sorted[N - 1]; // make the cut ON the number
+  for (const [k, s] of Object.entries(scores)) {
+    if (s && typeof s.score === 'number' &&
+        s.pos !== 'DQ' && s.pos !== 'WD_PAID' && s.pos !== 'WD_OUT' &&
+        s.score > cutScore) {
+      scores[k] = { ...s, pos: 'MC', score: 'MC' };
+    }
+  }
+}
+
 function parToInt(p) {
   if (p == null) return null;
   const s = String(p).trim().toUpperCase();
@@ -342,7 +380,10 @@ async function fetchDataGolfLive() {
         scores[key] = { pos: 'DQ', score: 'DQ', name: full };
       } else if (/WD/.test(posStr)) {
         const madeCutBeforeWD = rd != null && rd >= 3;
-        scores[key] = madeCutBeforeWD ? { pos: 'WD_PAID', score: 'WD_PAID', name: full } : { pos: 'MC', score: 'MC', name: full };
+        // Pre-cut withdrawals get their own status (NOT 'MC') — classifying
+        // them as MC made one routine Thursday WD falsely signal "the cut has
+        // happened," which killed the projected-cut line a day early.
+        scores[key] = madeCutBeforeWD ? { pos: 'WD_PAID', score: 'WD_PAID', name: full } : { pos: 'WD_OUT', score: 'WD_OUT', name: full };
       } else if (/CUT/.test(posStr)) {
         scores[key] = { pos: 'MC', score: 'MC', name: full };
       } else {
@@ -463,7 +504,7 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
 
   uniq.forEach(k => {
     const sc = scores ? scores[k] : null;
-    if (sc && (sc.pos === 'MC' || sc.pos === 'DQ')) { frozen[k] = 0; return; } // missed cut or DQ -> $0, fixed
+    if (sc && (sc.pos === 'MC' || sc.pos === 'DQ' || sc.pos === 'WD_OUT')) { frozen[k] = 0; return; } // out with no money — fixed
     if (sc && sc.pos === 'WD_PAID') { frozen[k] = prizeFn(9999); return; }     // withdrew after making cut -> approx last-place money, fixed
     if (eventFinal && sc && sc.pos) {                                          // event over -> real prize, fixed
       frozen[k] = prizeFn(parseInt(String(sc.pos).replace(/[^0-9]/g,''),10));
@@ -598,7 +639,20 @@ export default async function handler(req, res) {
           }
           if (dg.cutLineDiag) cutLineDiagOut = dg.cutLineDiag;
           if (dg.live) {
+            const prior = state?.scores || {};
             scores = dg.scores;
+            // ---- Carry-forward: if the feed DROPS a golfer (some feeds remove
+            // cut players for the weekend), keep their last known entry rather
+            // than letting them vanish into "—" on every table.
+            for (const [k, v] of Object.entries(prior)) {
+              if (!(k in scores)) scores[k] = v;
+            }
+            // ---- Synthetic cut: if round 2 is complete but the feed hasn't
+            // marked anyone CUT (some feeds keep numeric positions instead),
+            // apply the cut ourselves: top N & ties survive, everyone else MC.
+            // Deterministic once 36 holes are done — the same rule the
+            // tournament itself applies.
+            applySyntheticCutIfDue(scores, eventName);
             // eventFinal isn't directly knowable from this feed (no explicit
             // "status" field); per-golfer freezing inside simulateBreakfast
             // already converges to the exact result as each golfer completes,
