@@ -115,6 +115,8 @@
   .chip.warm{border-color:#5a4a1e;color:var(--goldB);background:rgba(201,166,78,.08)}
   .chip.watch{border-color:var(--watchEdge);color:#fff;background:linear-gradient(90deg,var(--watchA),var(--watchB));
     box-shadow:0 0 13px var(--watchGlow);animation:sizzle 1.3s ease-in-out infinite}
+  .chip.fav{border-color:var(--gold);color:#0a1408;background:linear-gradient(90deg,var(--goldB),var(--gold));
+    font-weight:800;box-shadow:0 0 13px var(--glow)}
   @keyframes sizzle{0%,100%{box-shadow:0 0 9px var(--watchGlow)}50%{box-shadow:0 0 19px var(--watchGlow2)}}
   .lb-amt{width:120px;text-align:right;font-family:'Fraunces',serif;font-weight:600;color:var(--cream);font-size:18px;font-variant-numeric:tabular-nums}
   .lb-amt .metaline{display:block;font-family:Inter;font-size:9.5px;font-weight:600;color:var(--muted);font-style:normal;margin-top:2px}
@@ -398,7 +400,7 @@
 </div>
 <div class="wrap">
   <div class="tabs">
-    <button class="tab active" data-view="board" onclick="setView('board')">Leaderboard</button>
+    <button class="tab active" data-view="board" onclick="setView('board')">Pick 'Em Leaderboard</button>
     <button class="tab" data-view="real" onclick="setView('real')">Real Leaderboard</button>
     <button class="tab" data-view="grid" onclick="setView('grid')">Picks Grid</button>
     <button class="tab" data-view="setup" id="setupTab" onclick="setView('setup')">Teams</button>
@@ -452,7 +454,7 @@ let _prizeMapCache = null, _prizeMapSig = '';
 function buildPrizeMap(){
   const scores = STATE.scores||{};
   const purse = STATE.purse||22500000;
-  const sig = purse+'|'+Object.keys(scores).sort().map(k=>k+':'+scores[k].pos+':'+scores[k].score).join(',');
+  const sig = purse+'|'+Object.keys(scores).sort().map(k=>k+':'+scores[k].pos+':'+scores[k].score).join(',')+'|'+JSON.stringify(STATE.cut_line||null)+'|'+(STATE.event_name||'');
   if(_prizeMapSig===sig) return _prizeMapCache;
   const groups={}; // numeric score-to-par -> [normNames tied at that score]
   const wdPaidNames=[];
@@ -479,6 +481,18 @@ function buildPrizeMap(){
     const madeCutCount = (cursor-1) + wdPaidNames.length;
     const lastPlace = Math.round(_prizeForSinglePos(madeCutCount, purse)/1000)*1000;
     for(const nm of wdPaidNames) map[nm]=lastPlace;
+  }
+  // Group rule: no appearance-fee money. Anyone currently BELOW the projected
+  // cut shows $0 — if the line holds, they miss the cut and earn nothing.
+  // A golfer exactly ON the number stays paid (you make the cut on the number).
+  // Early in round 1, before enough of the field has scores for a projection
+  // to exist, everyone shows full projected prizes; once the real cut is made,
+  // MC statuses take over and this no longer applies.
+  const pcz=projectedCut();
+  if(pcz && pcz.score!=null){
+    for(const [nm,s] of Object.entries(scores)){
+      if(s && typeof s.score==='number' && !doneStatus(s) && s.score>pcz.score) map[nm]=0;
+    }
   }
   _prizeMapCache=map; _prizeMapSig=sig;
   return map;
@@ -677,12 +691,15 @@ function cutTopN(){
 }
 // The single source of truth for the projected cut, used by both the widget
 // and the team-table dividers.
-// Priority 1: Data Golf's probabilistic cut model, if it's ever available
-//   (their public API doesn't currently expose it — website-only feature).
-// Priority 2 (the working path): computed from the live scores we already
-//   have — the score currently held by the Nth-ranked player, where N is
-//   this tournament's cut number. Everyone at that score makes the cut on
-//   the number, which the divider logic already respects.
+// Priority 1: Data Golf's explicit cut model, if their API ever exposes it.
+// Priority 2 (the working path): DERIVED from Data Golf's own model — every
+//   player's live make_cut probability is already in our data, and the cut
+//   line by definition falls where making it becomes a coin flip. So the
+//   projected cut = the score group whose average make-cut probability is
+//   closest to 50%. This is forward-looking like Data Golf's site number
+//   (it bakes in their expectations for the remaining holes), unlike the
+//   simple "current 70th place" snapshot, which reads a shot low.
+// Priority 3: that simple Nth-place snapshot, if make_cut data is absent.
 // Returns null once the cut is actually made (round 3+, or MC statuses exist).
 function projectedCut(){
   const entries=Object.values(STATE.scores||{});
@@ -698,8 +715,23 @@ function projectedCut(){
   if(!live.length) return null;
   const maxRound=Math.max(...live.map(s=>s.round||1));
   if(maxRound>=3) return null; // weekend — cut already happened
+  // ---- Priority 2: 50% make-cut crossing, from Data Golf's live model ----
+  const withMc=live.filter(s=>s.makeCut!=null);
+  if(withMc.length>=30){ // need a meaningful sample of the field
+    const byScore={};
+    for(const s of withMc){ (byScore[s.score]=byScore[s.score]||[]).push(s.makeCut); }
+    let best=null, bestDist=Infinity;
+    for(const [sc,arr] of Object.entries(byScore)){
+      if(arr.length<3) continue; // skip tiny noisy groups
+      const avg=arr.reduce((a,b)=>a+b,0)/arr.length;
+      const d=Math.abs(avg-0.5);
+      if(d<bestDist){ bestDist=d; best={score:Number(sc), avg}; }
+    }
+    if(best) return {score:best.score, source:'derived', avgMakeCut:best.avg};
+  }
+  // ---- Priority 3: current Nth-place snapshot ----
   const N=cutTopN();
-  if(live.length<=N) return null; // whole remaining field inside the number
+  if(live.length<=N) return null;
   const sorted=live.map(s=>s.score).sort((a,b)=>a-b);
   return {score:sorted[N-1], source:'computed', topN:N};
 }
@@ -720,8 +752,15 @@ function renderCutLineBox(){
   return `<div class="panel" style="padding:14px 20px;margin-bottom:14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
     <div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.03em">PROJECTED CUT LINE</div>
     <div style="font-family:'Fraunces',serif;font-size:24px;font-weight:700;color:var(--gold)">${esc(parToStr(pc.score))}</div>
-    <div style="font-size:12px;color:var(--muted)">Top ${pc.topN} &amp; ties · computed live from the current leaderboard</div>
+    <div style="font-size:12px;color:var(--muted)">${pc.source==='derived'
+      ? 'Derived from Data Golf\'s live make-cut model (the 50% crossing point)'
+      : 'Top '+pc.topN+' &amp; ties · computed live from the current leaderboard'}</div>
   </div>`;
+}
+// Shared cut-divider row: one continuous line — dashes · label · dashes.
+// Used by both the Pick 'Em team tables (colspan 4) and the Real Leaderboard (colspan 5).
+function cutDividerRowHTML(kind,score,colspan){
+  return `<tr class="cut-divider ${kind}"><td colspan="${colspan}"><div class="cd-wrap"><span class="cd-line"></span><span class="cd-lbl">${kind==='final'?'CUT LINE':'PROJECTED CUT '+esc(parToStr(score))}</span><span class="cd-line"></span></div></td></tr>`;
 }
 function scoreStr(sc){ if(!sc)return '—'; const tag=doneStatus(sc); if(tag) return tag; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -740,7 +779,7 @@ function renderBoard(){
   // (re)build the shell if the set of owners changed or first render
   if(builtSig!==sig){
     let head=`<div id="cutLineBox"></div><div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}<h2>Standings</h2><span class="meta" id="updMeta"></span></div>`;
-    head+=`<div class="lb-colhd"><div class="a">Pos</div><div class="b">Owner</div><div class="c">Breakfast</div><div class="d">Earnings</div></div>`;
+    head+=`<div class="lb-colhd"><div class="a">Pos</div><div class="b">Owner</div><div class="c">Win Odds</div><div class="d">Earnings</div></div>`;
     head+=`<div class="lb-rows" id="lbRows" style="height:${st.length*ROWH}px"></div>`;
     head+=`<div class="hint" id="lbHint"></div></div><div id="lbDetail"></div>`;
     container.innerHTML=head;
@@ -776,7 +815,7 @@ function renderBoard(){
   const pc=projectedCut();
   const projCutScore=pc?pc.score:null;
   const cutHappened=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
-  const cutDividerRow=(kind,score)=>`<tr class="cut-divider ${kind}"><td colspan="4"><div class="cd-wrap"><span class="cd-line"></span><span class="cd-lbl">${kind==='final'?'CUT LINE':'PROJECTED CUT '+esc(parToStr(score))}</span><span class="cd-line"></span></div></td></tr>`;
+  const cutDividerRow=(kind,score)=>cutDividerRowHTML(kind,score,4);
 
   const detail=st.map(o=>{
     const sorted=[...o.rows].sort((a,b)=>{
@@ -821,21 +860,24 @@ function renderBoard(){
 function positionRows(st,bk,any,hasBk,instant){
   const medals=['🥇','🥈','🥉'];
   const ord=['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th'];
-  const lastId = (any && st.length>1) ? st[st.length-1].id : null;
+  // bk now holds WIN probability per owner — highlight the FAVORITE (highest
+  // win %), which isn't always the current money leader.
+  let favId=null, favPct=-1;
+  if(hasBk){ st.forEach(o=>{ const p=bk[o.id]; if(p!=null && p>favPct){ favPct=p; favId=o.id; } }); }
   st.forEach((o,i)=>{
     const r=lbNodes[o.id]; if(!r) return;
     if(instant) r.style.transition='none'; else r.style.transition='';
     r.style.transform=`translateY(${i*ROWH}px)`;
     r.classList.toggle('leader', any && i===0);
-    r.classList.toggle('bwatch', o.id===lastId);
-    const isLast=o.id===lastId;
+    r.classList.toggle('bwatch', false);
+    const isFav=hasBk && o.id===favId && favPct>0;
     const pct=(bk[o.id]!=null)?bk[o.id]:null;
     r.querySelector('.num').textContent = i+1;
     r.querySelector('.lb-who b').textContent=o.name;
     r.querySelector('.lb-who i').textContent=o.team||'';
     const cs=r.querySelector('.chipspot');
-    if(isLast){ cs.className='chip watch chipspot'; cs.textContent='🍳 '+(pct!=null?pct+'% ':'')+'WATCH'; }
-    else if(hasBk && pct!=null){ cs.className='chip'+(pct<=8?' warm':'')+' chipspot'; cs.textContent=pct+'%'; }
+    if(isFav){ cs.className='chip fav chipspot'; cs.textContent='👑 '+pct+'% FAV'; }
+    else if(hasBk && pct!=null){ cs.className='chip chipspot'; cs.textContent=pct+'%'; }
     else { cs.className='chip chipspot'; cs.textContent=any?'—':'·'; }
     const amt=r.querySelector('.lb-amt');
     const newAmt=fmt(o.total);
@@ -913,18 +955,31 @@ function renderReal(){
     return as-bs;
   });
 
-  const rows=entries.map(({key,sc,tag})=>{
+  // Same cut divider as the Pick 'Em tables: gold dashed projected line
+  // between players above/below the projection, red solid line once real.
+  const pc=projectedCut();
+  const cutHappened=entries.some(e=>e.sc&&e.sc.pos==='MC');
+  let rows='', dividerDone=false;
+  entries.forEach(({key,sc,tag},i)=>{
+    if(!dividerDone && i>0){
+      if(cutHappened){
+        if(tag){ rows+=cutDividerRowHTML('final',null,5); dividerDone=true; }
+      } else if(pc && pc.score!=null){
+        const s=(sc && typeof sc.score==='number')?sc.score:null;
+        if(s!=null && s>pc.score){ rows+=cutDividerRowHTML('proj',pc.score,5); dividerDone=true; }
+      }
+    }
     const isPicked=pickedKeys.has(key);
     const thru=(!tag && sc.thru!=null)?(sc.thru>=18?'F':String(sc.thru)):'—';
     const cutOdds=(!tag && sc.makeCut!=null)?Math.round(sc.makeCut*100)+'%':'—';
-    return `<tr>
+    rows+=`<tr>
       <td class="c pos">${tag?'—':esc(sc.pos||'—')}</td>
       <td class="gname ${tag?'mc':''}">${esc(sc.name||key)}${tag?`<span class="mc-tag">${tag}</span>`:''}${isPicked?' <span title="Picked in this pool" style="color:var(--gold)">●</span>':''}</td>
       <td class="c score" style="${tag?'color:var(--red-soft)':''}">${scoreStr(sc)}</td>
       <td class="c">${thru}</td>
       <td class="c">${cutOdds}</td>
     </tr>`;
-  }).join('');
+  });
 
   const head=`<tr><th class="c">Pos</th><th>Golfer</th><th class="c">Score</th><th class="c">Thru</th><th class="c">Cut Odds</th></tr>`;
   document.getElementById('view-real').innerHTML=`<div class="panel"><div class="panel-head"><h2>Real Leaderboard</h2><span class="meta">${entries.length} players${STATE.event_name?' · '+esc(STATE.event_name):''}</span></div><table><thead>${head}</thead><tbody>${rows||'<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--muted)">No live scores yet — check back once the round starts.</td></tr>'}</tbody></table><div class="hint">The actual tournament field, refreshing the same as everything else. <span style="color:var(--gold)">●</span> marks a golfer picked in this pool.</div></div>`;

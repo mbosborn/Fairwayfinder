@@ -404,7 +404,11 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
     samplers[k] = makeSampler(probs[k] || null, fieldSize);
   });
 
-  const lastCount = {}; owners.forEach(o => lastCount[o.id] = 0);
+  // NOTE: the stored/DB field is still named `breakfast` (renaming a jsonb
+  // column isn't worth the migration risk), but its SEMANTICS are now WIN
+  // probability: each owner's chance of finishing FIRST in total prize money,
+  // not last. Same Monte Carlo machinery, opposite end of the table.
+  const winCount = {}; owners.forEach(o => winCount[o.id] = 0);
 
   for (let i = 0; i < runs; i++) {
     // 1) draw each LIVE golfer's outcome ONCE for this run
@@ -414,7 +418,7 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
       drawn[k] = pos === 'CUT' ? 0 : prizeFn(pos);
     }
     // 2) total each team using frozen + the shared drawn results
-    let worstId = null, worstTotal = Infinity;
+    let bestId = null, bestTotal = -Infinity;
     const tie = [];
     for (const o of owners) {
       let total = 0;
@@ -422,16 +426,16 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
         const k = keyFor[g];
         total += (k in frozen) ? frozen[k] : (drawn[k] || 0);
       }
-      if (total < worstTotal - 0.0001) { worstTotal = total; worstId = o.id; tie.length = 0; tie.push(o.id); }
-      else if (Math.abs(total - worstTotal) <= 0.0001) { tie.push(o.id); }
+      if (total > bestTotal + 0.0001) { bestTotal = total; bestId = o.id; tie.length = 0; tie.push(o.id); }
+      else if (Math.abs(total - bestTotal) <= 0.0001) { tie.push(o.id); }
     }
-    // 3) ties for last split the blame evenly (your "identical teams" case -> ~50/50)
-    if (tie.length > 1) { tie.forEach(id => lastCount[id] += 1/tie.length); }
-    else if (worstId != null) { lastCount[worstId] += 1; }
+    // 3) ties for first split the credit evenly (identical teams -> ~50/50)
+    if (tie.length > 1) { tie.forEach(id => winCount[id] += 1/tie.length); }
+    else if (bestId != null) { winCount[bestId] += 1; }
   }
 
   const out = {};
-  owners.forEach(o => out[o.id] = Math.round(lastCount[o.id] / runs * 1000) / 10);
+  owners.forEach(o => out[o.id] = Math.round(winCount[o.id] / runs * 1000) / 10);
   return out;
 }
 
