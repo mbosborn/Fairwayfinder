@@ -715,19 +715,28 @@ function projectedCut(){
   if(!live.length) return null;
   const maxRound=Math.max(...live.map(s=>s.round||1));
   if(maxRound>=3) return null; // weekend — cut already happened
-  // ---- Priority 2: 50% make-cut crossing, from Data Golf's live model ----
+  // ---- Priority 2: derived from Data Golf's live make-cut model ----
+  // The projected line = the first score (walking DOWN the leaderboard) whose
+  // players are, on average, more likely to MISS the cut than make it
+  // (group avg make-cut < 50%). Players inside the line average well above
+  // 50%, players one shot outside it crater toward ~15% — the line sits at
+  // the bubble score right before that cliff. This tracks Data Golf's
+  // "most likely cutline" better than a closest-to-50% rule, which can read
+  // a shot low when the group just inside the line also hovers near 50%.
   const withMc=live.filter(s=>s.makeCut!=null);
   if(withMc.length>=30){ // need a meaningful sample of the field
     const byScore={};
     for(const s of withMc){ (byScore[s.score]=byScore[s.score]||[]).push(s.makeCut); }
-    let best=null, bestDist=Infinity;
-    for(const [sc,arr] of Object.entries(byScore)){
-      if(arr.length<3) continue; // skip tiny noisy groups
+    const scoresAsc=Object.keys(byScore).map(Number).sort((a,b)=>a-b);
+    let seenAbove=false, line=null;
+    for(const sc of scoresAsc){
+      const arr=byScore[sc]; if(arr.length<3) continue; // skip tiny noisy groups
       const avg=arr.reduce((a,b)=>a+b,0)/arr.length;
-      const d=Math.abs(avg-0.5);
-      if(d<bestDist){ bestDist=d; best={score:Number(sc), avg}; }
+      if(avg>=0.5){ seenAbove=true; continue; }
+      if(seenAbove){ line={score:sc, avg}; }
+      break;
     }
-    if(best) return {score:best.score, source:'derived', avgMakeCut:best.avg};
+    if(line) return {score:line.score, source:'derived', avgMakeCut:line.avg};
   }
   // ---- Priority 3: current Nth-place snapshot ----
   const N=cutTopN();

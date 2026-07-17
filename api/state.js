@@ -154,6 +154,87 @@ async function fetchPurseFromRapid(eventName) {
   }
 }
 
+// ---- Purse source 2: ESPN's public scoreboard JSON ----
+// Unofficial but public and key-free (site.api.espn.com). Used as the second
+// opinion when RapidAPI is down. Response shape isn't formally documented, so
+// this hunts for any purse-ish field on the matched event (depth-limited) and
+// self-diagnoses if the shape doesn't match expectations — same pattern as
+// every other integration in this file.
+async function fetchPurseFromESPN(eventName) {
+  if (!eventName) return { purse: null, diag: null };
+  try {
+    const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard');
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { purse: null, diag: `ESPN scoreboard HTTP ${r.status} ${t.slice(0,120)}` };
+    }
+    const data = await r.json();
+    const events = data?.events || [];
+    if (!events.length) return { purse: null, diag: 'ESPN scoreboard returned no events' };
+    let match = null, bestScore = 0;
+    for (const e of events) {
+      const s = Math.max(nameSimilarity(e.name, eventName), nameSimilarity(e.shortName, eventName));
+      if (s > bestScore) { bestScore = s; match = e; }
+    }
+    if (!match) return { purse: null, diag: `no ESPN event matched "${eventName}" among ${events.map(e=>e.name).join(', ').slice(0,150)}` };
+    // depth-limited hunt for a purse-ish field anywhere on the matched event
+    let found = null;
+    const hunt = (obj, depth) => {
+      if (found != null || !obj || typeof obj !== 'object' || depth > 3) return;
+      for (const [k, v] of Object.entries(obj)) {
+        if (found != null) return;
+        if (/purse/i.test(k)) {
+          const n = typeof v === 'number' ? v : parseInt(String(v).replace(/[^0-9]/g,''), 10);
+          if (!isNaN(n) && n > 100000) { found = n; return; }
+        }
+        if (v && typeof v === 'object') hunt(v, depth + 1);
+      }
+    };
+    hunt(match, 0);
+    if (found == null) return { purse: null, diag: `matched ESPN event "${match.name}" but found no purse field — its top-level keys: ${Object.keys(match).join(',')}` };
+    return { purse: found, matchedName: match.name, diag: null };
+  } catch (e) {
+    return { purse: null, diag: 'ESPN purse lookup threw: ' + e.message };
+  }
+}
+
+// ---- Purse source 3: verified 2026 purses, from official announcements ----
+// Hardcoded backstop for the events this pool actually plays. Each number was
+// verified against the organizing body's own announcement (July 2026):
+//   Masters $22.5M · PGA Championship $20.5M · U.S. Open $22.5M ·
+//   The Open $17.75M (R&A, announced Open week 2026) · Players $25M
+// Year-guarded so these can't silently apply to a future season's events.
+const KNOWN_2026_PURSES = [
+  { re: /masters/i,                      purse: 22500000 },
+  { re: /pga championship/i,             purse: 20500000 },
+  { re: /u\.?s\.? open/i,                purse: 22500000 },
+  { re: /open championship|the open\b/i, purse: 17750000 },
+  { re: /players championship/i,         purse: 25000000 },
+];
+function knownPurse(eventName) {
+  if (new Date().getFullYear() !== 2026) return null; // numbers verified for 2026 only
+  if (!eventName) return null;
+  const hit = KNOWN_2026_PURSES.find(x => x.re.test(eventName));
+  return hit ? hit.purse : null;
+}
+
+// ---- Layered purse resolution: RapidAPI -> ESPN -> verified table ----
+// First source to produce a number wins; if all fail, every diagnostic is
+// returned together so the error message says exactly what happened at each layer.
+async function resolvePurse(eventName) {
+  const diags = [];
+  const rap = await fetchPurseFromRapid(eventName);
+  if (rap.purse) return { purse: rap.purse, source: 'RapidAPI', diag: null };
+  if (rap.diag) diags.push('RapidAPI: ' + rap.diag);
+  const espn = await fetchPurseFromESPN(eventName);
+  if (espn.purse) return { purse: espn.purse, source: 'ESPN', diag: null };
+  if (espn.diag) diags.push('ESPN: ' + espn.diag);
+  const known = knownPurse(eventName);
+  if (known) return { purse: known, source: 'verified 2026 table', diag: null };
+  diags.push('verified table: no 2026 entry matches this event');
+  return { purse: null, source: null, diag: diags.join(' | ') };
+}
+
 function parToInt(p) {
   if (p == null) return null;
   const s = String(p).trim().toUpperCase();
@@ -549,7 +630,7 @@ export default async function handler(req, res) {
         if (cooldownActive) {
           purseErrorOut = purseLastError; // keep showing the last known issue, but don't re-attempt yet
         } else {
-          const pr = await fetchPurseFromRapid(eventName);
+          const pr = await resolvePurse(eventName);
           if (pr.purse) {
             purse = pr.purse;
             purseEventName = eventName;
