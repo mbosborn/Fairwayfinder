@@ -149,11 +149,12 @@
   .cut-divider td{padding:3px 20px 5px;text-align:center;font-size:9.5px;letter-spacing:.12em;font-weight:800}
   .cut-divider.proj td{border-top:2px dashed var(--gold);color:var(--gold)}
   .cut-divider.final td{border-top:2px solid var(--red-soft);color:var(--red-soft)}
-  /* Links-course side decorations — original line art, only on wide screens */
-  .decor{position:fixed;top:24vh;width:230px;color:var(--gold);opacity:.07;pointer-events:none;z-index:0}
-  #decorL{left:2.5vw}
-  #decorR{right:2.5vw}
-  @media(max-width:1499px){.decor{display:none}}
+  /* Aerial golf-course background — original art, detail lives in the side
+     thirds; a built-in center fade keeps the content column clean. */
+  #courseBg{position:fixed;inset:0;z-index:0;pointer-events:none}
+  #courseBg svg{width:100%;height:100%;display:block}
+  .wrap,.topbar,.evbanner{position:relative;z-index:1}
+  @media(max-width:1199px){#courseBg{display:none}}
   .score{font-weight:700}.prize{color:var(--mist);font-weight:700}.pos{color:var(--muted);font-weight:700}
   .chk{display:inline-flex;align-items:center;justify-content:center;width:23px;height:23px;border-radius:6px;font-size:12px;font-weight:800}
   .chk.yes{background:var(--gold);color:#071008}.chk.no-cut{background:var(--watchB);color:#fff}
@@ -268,33 +269,128 @@
   </div>
 </div>
 
-<div class="decor" id="decorL" aria-hidden="true">
-  <svg viewBox="0 0 220 460" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-    <line x1="120" y1="30" x2="120" y2="300"/>
-    <path d="M120 30 L188 55 L120 82 Z" fill="currentColor" stroke="none"/>
-    <ellipse cx="120" cy="304" rx="13" ry="4.5"/>
-    <path d="M18 336 Q120 306 205 340"/>
-    <path d="M8 372 Q118 336 212 376"/>
-    <path d="M14 412 Q120 372 208 416"/>
-    <circle cx="58" cy="352" r="3.5" fill="currentColor" stroke="none"/>
-  </svg>
-</div>
-<div class="decor" id="decorR" aria-hidden="true">
-  <svg viewBox="0 0 220 460" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-    <path d="M42 66 Q14 96 46 116 Q96 140 132 114 Q166 90 130 66 Q84 42 42 66 Z"/>
-    <path d="M66 86 Q92 100 118 88"/>
-    <path d="M148 148 Q128 168 152 182 Q186 198 202 176 Q214 158 190 146 Q166 136 148 148 Z"/>
-    <path d="M16 262 q22 -14 44 0 t44 0 t44 0 t44 0"/>
-    <path d="M16 296 q22 -14 44 0 t44 0 t44 0 t44 0"/>
-    <path d="M16 330 q22 -14 44 0 t44 0 t44 0 t44 0"/>
-    <path d="M16 364 q22 -14 44 0 t44 0 t44 0 t44 0"/>
-  </svg>
+<div id="courseBg" aria-hidden="true">
+<svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cgFadeC" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#070d09" stop-opacity="0"/>
+      <stop offset=".24" stop-color="#070d09" stop-opacity=".92"/>
+      <stop offset=".76" stop-color="#070d09" stop-opacity=".92"/>
+      <stop offset="1" stop-color="#070d09" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="cgWater" cx=".4" cy=".35" r=".9">
+      <stop offset="0" stop-color="#1d3a4d"/><stop offset="1" stop-color="#122431"/>
+    </radialGradient>
+    <radialGradient id="cgGreen" cx=".45" cy=".4" r=".9">
+      <stop offset="0" stop-color="#33593b"/><stop offset="1" stop-color="#264630"/>
+    </radialGradient>
+    <clipPath id="cgFwL"><path d="M262 1005 C300 900 268 812 244 730 C216 636 200 560 214 470 C226 392 236 330 222 252 L168 250 C150 330 158 402 172 480 C186 566 176 640 198 736 C222 826 210 912 190 1002 Z"/></clipPath>
+    <clipPath id="cgFwR"><path d="M1648 90 C1610 170 1618 250 1650 320 C1684 394 1706 452 1698 530 L1770 545 C1788 458 1768 386 1736 314 C1706 246 1698 168 1722 92 Z"/></clipPath>
+  </defs>
+
+  <!-- ======================= LEFT HOLE (par 4, dogleg) ======================= -->
+  <g opacity=".6">
+    <!-- rough surround -->
+    <path d="M120 1040 C90 880 110 760 128 640 C146 520 130 380 160 220 C200 170 300 168 330 230 C310 380 300 470 288 560 C276 680 300 800 320 920 C330 990 300 1040 260 1050 Z" fill="#101d14"/>
+    <!-- fairway -->
+    <path d="M262 1005 C300 900 268 812 244 730 C216 636 200 560 214 470 C226 392 236 330 222 252 L168 250 C150 330 158 402 172 480 C186 566 176 640 198 736 C222 826 210 912 190 1002 Z" fill="#1c3423"/>
+    <!-- mowing stripes -->
+    <g clip-path="url(#cgFwL)" fill="#213c29">
+      <rect x="60" y="240" width="320" height="34"/><rect x="60" y="308" width="320" height="34"/>
+      <rect x="60" y="376" width="320" height="34"/><rect x="60" y="444" width="320" height="34"/>
+      <rect x="60" y="512" width="320" height="34"/><rect x="60" y="580" width="320" height="34"/>
+      <rect x="60" y="648" width="320" height="34"/><rect x="60" y="716" width="320" height="34"/>
+      <rect x="60" y="784" width="320" height="34"/><rect x="60" y="852" width="320" height="34"/>
+      <rect x="60" y="920" width="320" height="34"/><rect x="60" y="988" width="320" height="34"/>
+    </g>
+    <!-- green complex -->
+    <ellipse cx="196" cy="196" rx="74" ry="52" fill="#22412b"/>
+    <ellipse cx="194" cy="192" rx="58" ry="40" fill="url(#cgGreen)"/>
+    <!-- greenside bunkers, lipped -->
+    <path d="M110 168 q-26 8 -20 30 q8 24 36 16 q24 -8 18 -28 q-6 -22 -34 -18 Z" fill="#5d5138"/>
+    <path d="M116 174 q-16 6 -12 20 q6 15 24 10 q15 -6 11 -18 q-4 -14 -23 -12 Z" fill="#6e6044"/>
+    <path d="M258 232 q-22 12 -10 32 q12 18 34 8 q20 -10 10 -28 q-10 -18 -34 -12 Z" fill="#5d5138"/>
+    <path d="M262 238 q-13 8 -6 20 q8 11 21 5 q12 -6 6 -17 q-6 -11 -21 -8 Z" fill="#6e6044"/>
+    <!-- flag -->
+    <line x1="194" y1="150" x2="194" y2="196" stroke="#d8dcd8" stroke-width="2.5"/>
+    <path d="M194 150 L222 159 L194 169 Z" fill="#c9a54a"/>
+    <circle cx="194" cy="197" r="3" fill="#0b120e"/>
+    <!-- fairway bunkers -->
+    <path d="M284 566 q-30 6 -26 30 q6 28 38 22 q28 -6 22 -30 q-6 -26 -34 -22 Z" fill="#5d5138"/>
+    <path d="M290 574 q-18 4 -15 18 q4 17 23 13 q17 -4 13 -18 q-4 -16 -21 -13 Z" fill="#6e6044"/>
+    <path d="M150 700 q-26 10 -18 32 q10 24 36 14 q24 -10 15 -30 q-9 -22 -33 -16 Z" fill="#5d5138"/>
+    <!-- pond -->
+    <path d="M312 780 q-44 8 -40 46 q6 44 56 40 q46 -6 40 -46 q-6 -42 -56 -40 Z" fill="url(#cgWater)"/>
+    <path d="M300 806 q22 10 44 0" stroke="#2a4a5e" stroke-width="2" fill="none"/>
+    <path d="M306 826 q20 9 38 0" stroke="#2a4a5e" stroke-width="2" fill="none"/>
+    <!-- tee boxes -->
+    <rect x="232" y="948" width="42" height="18" rx="8" fill="#22412b"/>
+    <rect x="222" y="988" width="42" height="18" rx="8" fill="#22412b"/>
+    <!-- cart path -->
+    <path d="M330 1010 C356 880 340 760 352 640 C362 520 350 380 330 250" stroke="#3a3d38" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <!-- trees -->
+    <g fill="#0f2016" stroke="#0a150e" stroke-width="2">
+      <circle cx="76" cy="360" r="20"/><circle cx="104" cy="386" r="15"/><circle cx="66" cy="404" r="13"/>
+      <circle cx="88" cy="560" r="18"/><circle cx="64" cy="588" r="14"/>
+      <circle cx="80" cy="760" r="21"/><circle cx="110" cy="784" r="14"/><circle cx="62" cy="792" r="12"/>
+      <circle cx="352" cy="330" r="17"/><circle cx="378" cy="356" r="13"/>
+      <circle cx="368" cy="960" r="19"/><circle cx="394" cy="984" r="13"/>
+    </g>
+  </g>
+
+  <!-- ======================= RIGHT HOLE (par 3 over water) ======================= -->
+  <g opacity=".6">
+    <!-- rough surround -->
+    <path d="M1600 40 C1560 200 1580 360 1620 480 C1660 600 1660 760 1620 920 C1680 1010 1800 1010 1860 940 C1880 780 1856 640 1836 520 C1812 380 1820 200 1800 50 Z" fill="#101d14"/>
+    <!-- big lake -->
+    <path d="M1592 650 q-40 60 0 130 q50 82 150 74 q104 -8 120 -92 q14 -78 -50 -122 q-70 -46 -140 -30 q-52 12 -80 40 Z" fill="url(#cgWater)"/>
+    <path d="M1620 700 q40 20 84 4" stroke="#2a4a5e" stroke-width="2.5" fill="none"/>
+    <path d="M1640 744 q44 20 92 2" stroke="#2a4a5e" stroke-width="2.5" fill="none"/>
+    <path d="M1668 788 q38 16 78 2" stroke="#2a4a5e" stroke-width="2.5" fill="none"/>
+    <!-- fairway/approach -->
+    <path d="M1648 90 C1610 170 1618 250 1650 320 C1684 394 1706 452 1698 530 L1770 545 C1788 458 1768 386 1736 314 C1706 246 1698 168 1722 92 Z" fill="#1c3423"/>
+    <g clip-path="url(#cgFwR)" fill="#213c29">
+      <rect x="1580" y="84" width="240" height="30"/><rect x="1580" y="144" width="240" height="30"/>
+      <rect x="1580" y="204" width="240" height="30"/><rect x="1580" y="264" width="240" height="30"/>
+      <rect x="1580" y="324" width="240" height="30"/><rect x="1580" y="384" width="240" height="30"/>
+      <rect x="1580" y="444" width="240" height="30"/><rect x="1580" y="504" width="240" height="30"/>
+    </g>
+    <!-- peninsula green jutting into the lake -->
+    <ellipse cx="1728" cy="606" rx="72" ry="50" fill="#22412b"/>
+    <ellipse cx="1726" cy="602" rx="56" ry="38" fill="url(#cgGreen)"/>
+    <line x1="1726" y1="560" x2="1726" y2="604" stroke="#d8dcd8" stroke-width="2.5"/>
+    <path d="M1726 560 L1754 569 L1726 579 Z" fill="#c9a54a"/>
+    <circle cx="1726" cy="605" r="3" fill="#0b120e"/>
+    <!-- bunkers guarding the green -->
+    <path d="M1636 566 q-28 10 -18 32 q12 24 38 14 q24 -10 14 -30 q-10 -22 -34 -16 Z" fill="#5d5138"/>
+    <path d="M1642 574 q-16 6 -11 19 q7 14 23 8 q14 -6 8 -18 q-6 -13 -20 -9 Z" fill="#6e6044"/>
+    <path d="M1798 548 q-26 8 -20 30 q8 26 36 18 q26 -8 18 -30 q-8 -24 -34 -18 Z" fill="#5d5138"/>
+    <!-- long waste bunker along the fairway -->
+    <path d="M1608 200 q-20 60 4 130 q16 46 44 60 q18 -12 10 -50 q-12 -56 -20 -96 q-6 -34 -38 -44 Z" fill="#544a34"/>
+    <path d="M1620 240 q-8 44 8 92" stroke="#6e6044" stroke-width="3" fill="none"/>
+    <!-- tee boxes -->
+    <rect x="1676" y="98" width="44" height="18" rx="8" fill="#22412b"/>
+    <rect x="1688" y="58" width="44" height="18" rx="8" fill="#22412b"/>
+    <!-- cart path around the lake -->
+    <path d="M1590 120 C1560 300 1572 470 1584 620 C1592 760 1620 880 1700 940" stroke="#3a3d38" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <!-- trees -->
+    <g fill="#0f2016" stroke="#0a150e" stroke-width="2">
+      <circle cx="1840" cy="150" r="22"/><circle cx="1866" cy="184" r="15"/><circle cx="1822" cy="190" r="13"/>
+      <circle cx="1852" cy="330" r="18"/><circle cx="1876" cy="360" r="13"/>
+      <circle cx="1620" cy="960" r="20"/><circle cx="1652" cy="984" r="14"/>
+      <circle cx="1844" cy="900" r="19"/><circle cx="1870" cy="928" r="13"/>
+    </g>
+  </g>
+
+  <!-- center fade so the art never competes with the content column -->
+  <rect x="0" y="0" width="1920" height="1080" fill="url(#cgFadeC)"/>
+</svg>
 </div>
 <div class="wrap">
   <div class="tabs">
     <button class="tab active" data-view="board" onclick="setView('board')">Leaderboard</button>
-    <button class="tab" data-view="grid" onclick="setView('grid')">Picks Grid</button>
     <button class="tab" data-view="real" onclick="setView('real')">Real Leaderboard</button>
+    <button class="tab" data-view="grid" onclick="setView('grid')">Picks Grid</button>
     <button class="tab" data-view="setup" id="setupTab" onclick="setView('setup')">Teams</button>
   </div>
   <div id="view-board"></div>
@@ -560,19 +656,61 @@ function parToStr(n){
 // probabilities" widget. Quietly renders nothing if this data isn't available
 // (e.g. before the tournament starts, after the cut is already final, or if
 // the feed doesn't expose it) rather than showing an empty/broken box.
-function renderCutLineBox(){
+// How many players (plus ties) make the cut — varies by tournament.
+function cutTopN(){
+  const n=String(STATE.event_name||'').toLowerCase();
+  if(/masters/.test(n)) return 50;
+  if(/pga championship/.test(n)) return 70;
+  if(/u\.?s\.? open/.test(n)) return 60;
+  if(/open championship|the open\b/.test(n)) return 70;
+  return 65; // standard PGA Tour cut
+}
+// The single source of truth for the projected cut, used by both the widget
+// and the team-table dividers.
+// Priority 1: Data Golf's probabilistic cut model, if it's ever available
+//   (their public API doesn't currently expose it — website-only feature).
+// Priority 2 (the working path): computed from the live scores we already
+//   have — the score currently held by the Nth-ranked player, where N is
+//   this tournament's cut number. Everyone at that score makes the cut on
+//   the number, which the divider logic already respects.
+// Returns null once the cut is actually made (round 3+, or MC statuses exist).
+function projectedCut(){
+  const entries=Object.values(STATE.scores||{});
+  const cutDone=entries.some(s=>s&&s.pos==='MC');
+  if(cutDone) return null;
   const cl=STATE.cut_line;
-  if(!cl || !Array.isArray(cl) || !cl.length) return '';
-  const sorted=[...cl].filter(x=>x && x.score!=null).sort((a,b)=>(b.prob||0)-(a.prob||0)).slice(0,3);
-  if(!sorted.length) return '';
-  const items=sorted.map(x=>`
-    <div style="text-align:center;min-width:70px">
-      <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:700;color:var(--cream)">${esc(parToStr(x.score))}</div>
-      <div style="font-size:12px;color:var(--gold);font-weight:700">${x.prob!=null?Math.round(x.prob*100)+'%':'—'}</div>
-    </div>`).join('');
-  return `<div class="panel" style="padding:14px 20px;margin-bottom:14px">
-    <div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.03em;margin-bottom:10px">PROJECTED CUT LINE</div>
-    <div style="display:flex;gap:24px">${items}</div>
+  if(cl&&Array.isArray(cl)&&cl.length){
+    const s=[...cl].filter(x=>x&&x.score!=null).sort((a,b)=>(b.prob||0)-(a.prob||0));
+    const v=s.length?Number(s[0].score):NaN;
+    if(!isNaN(v)) return {score:v, source:'model', dist:s.slice(0,3)};
+  }
+  const live=entries.filter(s=>s&&typeof s.score==='number'&&!doneStatus(s));
+  if(!live.length) return null;
+  const maxRound=Math.max(...live.map(s=>s.round||1));
+  if(maxRound>=3) return null; // weekend — cut already happened
+  const N=cutTopN();
+  if(live.length<=N) return null; // whole remaining field inside the number
+  const sorted=live.map(s=>s.score).sort((a,b)=>a-b);
+  return {score:sorted[N-1], source:'computed', topN:N};
+}
+function renderCutLineBox(){
+  const pc=projectedCut();
+  if(!pc) return '';
+  if(pc.source==='model'){
+    const items=pc.dist.map(x=>`
+      <div style="text-align:center;min-width:70px">
+        <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:700;color:var(--cream)">${esc(parToStr(x.score))}</div>
+        <div style="font-size:12px;color:var(--gold);font-weight:700">${x.prob!=null?Math.round(x.prob*100)+'%':'—'}</div>
+      </div>`).join('');
+    return `<div class="panel" style="padding:14px 20px;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.03em;margin-bottom:10px">PROJECTED CUT LINE</div>
+      <div style="display:flex;gap:24px">${items}</div>
+    </div>`;
+  }
+  return `<div class="panel" style="padding:14px 20px;margin-bottom:14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.03em">PROJECTED CUT LINE</div>
+    <div style="font-family:'Fraunces',serif;font-size:24px;font-weight:700;color:var(--gold)">${esc(parToStr(pc.score))}</div>
+    <div style="font-size:12px;color:var(--muted)">Top ${pc.topN} &amp; ties · computed live from the current leaderboard</div>
   </div>`;
 }
 function scoreStr(sc){ if(!sc)return '—'; const tag=doneStatus(sc); if(tag) return tag; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
@@ -622,11 +760,11 @@ function renderBoard(){
 
   // Cut-line divider context, shared by every team's table below:
   // before the cut is made, a gold dashed "PROJECTED CUT" line sits between
-  // golfers above/below the most likely cut score; once anyone has actually
-  // been cut, it becomes a red solid "CUT LINE" between live and cut golfers.
-  const projCutScore=(()=>{ const cl=STATE.cut_line; if(!cl||!Array.isArray(cl)||!cl.length) return null;
-    const s=[...cl].filter(x=>x&&x.score!=null).sort((a,b)=>(b.prob||0)-(a.prob||0));
-    const v=s.length?Number(s[0].score):NaN; return isNaN(v)?null:v; })();
+  // golfers above/below the projected cut (see projectedCut() for how it's
+  // derived); once anyone has actually been cut, it becomes a red solid
+  // "CUT LINE" between live and cut golfers.
+  const pc=projectedCut();
+  const projCutScore=pc?pc.score:null;
   const cutHappened=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
   const cutDividerRow=(kind,score)=>`<tr class="cut-divider ${kind}"><td colspan="4"><span>${kind==='final'?'CUT LINE':'PROJECTED CUT '+esc(parToStr(score))}</span></td></tr>`;
 
