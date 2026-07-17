@@ -611,6 +611,7 @@ export default async function handler(req, res) {
       let purseLastError = state?.purse_lookup_error || null;
       let eventName = state?.event_name;
       let breakfast = state?.breakfast || {};
+      let oddsHistory = state?.odds_history || [];
       let cutLine = state?.cut_line || null;
 
       if (!process.env.DATAGOLF_KEY) {
@@ -658,6 +659,29 @@ export default async function handler(req, res) {
             // already converges to the exact result as each golfer completes,
             // so we don't need a separate whole-event "final" flag here.
             breakfast = simulateBreakfast(state?.owners || [], dg, scores, prizeByPos(purse), false);
+            // ---- Win-odds history: snapshot once per round, for the weekend
+            // trend panel. We record the odds the FIRST time we see each round
+            // number, so each entry captures "where odds stood entering/at this
+            // round" — giving the panel its ▲/▼ vs the prior round.
+            const liveRounds = Object.values(scores)
+              .filter(s => s && typeof s.score === 'number' && s.round != null)
+              .map(s => Number(s.round));
+            const curRound = liveRounds.length ? Math.max(...liveRounds) : null;
+            if (curRound != null && Object.keys(breakfast).length) {
+              const hist = Array.isArray(oddsHistory) ? oddsHistory.slice() : [];
+              const already = hist.some(h => h.round === curRound);
+              if (!already) {
+                hist.push({ round: curRound, ts: new Date().toISOString(), odds: { ...breakfast } });
+                // keep it small: at most the 4 tournament rounds
+                oddsHistory = hist.slice(-4);
+              } else {
+                // refresh the latest round's snapshot so "current" stays live,
+                // but leave earlier rounds frozen as historical anchors.
+                const idx = hist.map(h => h.round).lastIndexOf(curRound);
+                hist[idx] = { round: curRound, ts: new Date().toISOString(), odds: { ...breakfast } };
+                oddsHistory = hist;
+              }
+            }
           }
           // if !dg.live: tournament hasn't started yet (or feed is momentarily
           // empty) — leave prior scores/breakfast as-is rather than blanking them.
@@ -717,6 +741,7 @@ export default async function handler(req, res) {
         purse_lookup_error: purseLastError,
         scores,
         breakfast,
+        odds_history: oddsHistory,
         field,
         cut_line: cutLine,
         updated_at: new Date().toISOString(),

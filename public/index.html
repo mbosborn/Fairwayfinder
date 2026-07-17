@@ -147,6 +147,33 @@
   tbody td.c{text-align:center}
   .gname{font-weight:600;font-family:'Fraunces',serif}.gname.mc{color:var(--red-soft)}
   .mc-tag{font-size:9px;color:var(--red-soft);font-weight:700;margin-left:6px}
+  /* ESPN-style pinned recap ticker */
+  .recap-ticker{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:stretch;height:38px;
+    background:linear-gradient(180deg,#0b120e,#060a07);border-top:1px solid var(--gold);
+    box-shadow:0 -4px 20px rgba(0,0,0,.5)}
+  .rt-badge{display:flex;align-items:center;gap:7px;padding:0 16px;background:var(--gold);color:#0a1408;
+    font-weight:900;font-size:11px;letter-spacing:.06em;white-space:nowrap;font-family:Inter}
+  .rt-live{width:7px;height:7px;border-radius:50%;background:#0a1408;animation:rtpulse 1.6s ease-in-out infinite}
+  @keyframes rtpulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .rt-scroll{flex:1;overflow:hidden;position:relative;display:flex;align-items:center}
+  .rt-track{white-space:nowrap;will-change:transform;font-family:'Fraunces',serif;font-size:14.5px;color:var(--cream);
+    padding-left:100%;animation:rtscroll 46s linear infinite}
+  .rt-track:hover{animation-play-state:paused}
+  @keyframes rtscroll{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+  .rt-btn{background:transparent;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0 12px;
+    font-family:Inter;transition:color .2s}
+  .rt-btn:hover{color:var(--gold)}
+  .rt-close:hover{color:var(--red-soft)}
+  .recap-reopen{position:fixed;right:14px;bottom:14px;z-index:60;background:var(--gold);color:#0a1408;
+    border:none;border-radius:20px;padding:8px 15px;font-weight:800;font-size:12px;cursor:pointer;
+    font-family:Inter;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  .wrap{padding-bottom:52px}
+  @media(max-width:560px){
+    .recap-ticker{height:34px}
+    .rt-track{font-size:13px}
+    .rt-badge{padding:0 10px;font-size:10px}
+    .rt-btn{padding:0 9px}
+  }
   /* Cut-line dividers inside team tables — one continuous line:
      dashes · label · dashes */
   .cut-divider td{padding:5px 12px;border:none}
@@ -200,9 +227,30 @@
   @media(max-width:560px){
     .wrap{padding:14px 11px}
     .brand .sub{max-width:150px}
-    .lb-amt{width:104px;font-size:16px}
+    /* Tabs: never wrap — scroll horizontally instead */
+    .tabs{width:100%;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{white-space:nowrap;padding:7px 11px;font-size:12px}
+    /* Standings rows: reclaim space for team names — smaller everything else */
+    .lb-row{padding:10px 12px;gap:8px}
+    .lb-pos{width:30px}
+    .lb-pos .num{font-size:16px}
+    .lb-who b{font-size:13.5px}
+    .lb-who i{font-size:9px}
+    .chip{font-size:9.5px;padding:3px 7px}
+    .lb-amt{width:88px;font-size:14.5px}
+    .lb-amt .metaline{font-size:8.5px}
     .lb-odds{width:78px}
+    /* Header buttons/pills compact */
+    .btn{padding:6px 10px;font-size:12px}
+    .btn svg{width:13px;height:13px}
+    .refresh-pill{font-size:10px;padding:4px 8px}
     .evbox{display:none}
+    /* Tables (team details, picks grid, real leaderboard): scroll sideways
+       instead of crushing columns */
+    .panel{overflow-x:auto}
+    table{min-width:480px}
+    td,th{padding-left:10px;padding-right:10px}
   }
 
   /* ============ THEME PACKS ============ */
@@ -547,7 +595,7 @@ function nameKeys(name){
   return [...keys];
 }
 
-let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},field:[],cut_line:null,updated_at:null};
+let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},odds_history:[],field:[],cut_line:null,updated_at:null};
 let dataLoaded=false; // true once the first real /api/state response has arrived
 let view='board';
 let prevOrder=[];      // for overtake arrows
@@ -636,6 +684,7 @@ function applyState(d){
     breakfast:d.breakfast||STATE.breakfast||{},
     field:d.field||STATE.field||[],
     cut_line:d.cut_line!==undefined?d.cut_line:STATE.cut_line,
+    odds_history:d.odds_history!==undefined?d.odds_history:STATE.odds_history,
     updated_at:d.updated_at||STATE.updated_at
   };
   applyTheme();
@@ -765,6 +814,72 @@ function renderCutLineBox(){
     ${pc.source==='computed'?`<div style="font-size:12px;color:var(--muted)">Top ${pc.topN} &amp; ties · computed live from the current leaderboard</div>`:''}
   </div>`;
 }
+// Weekend win-odds trend panel — fills the projected-cut slot after the cut.
+// Shows each team's current win odds, a 3-point sparkline of their recent
+// snapshots, and the ▲/▼ change since the prior round's snapshot. All values
+// come from odds_history (recorded server-side at round boundaries); if no
+// history exists yet (e.g. first weekend refresh), it degrades to just the
+// current odds with no arrows.
+function renderWeekendPanel(){
+  const bk=STATE.breakfast||{};
+  const owners=STATE.owners||[];
+  if(!owners.length || !Object.keys(bk).length) return '';
+  const hist=Array.isArray(STATE.odds_history)?STATE.odds_history:[];
+  // prior = the most recent snapshot BEFORE the current (latest) one
+  const prior = hist.length>=2 ? hist[hist.length-2] : null;
+  const priorRound = prior ? prior.round : null;
+
+  // rank owners by current odds, desc
+  const rows=owners.map(o=>({o, pct: bk[o.id]!=null?bk[o.id]:0}))
+    .sort((a,b)=>b.pct-a.pct);
+  const favId = rows.length && rows[0].pct>0 ? rows[0].o.id : null;
+
+  const spark=(id)=>{
+    // up to the last 3 snapshots' odds for this owner
+    const pts=hist.slice(-3).map(h=>(h.odds&&h.odds[id]!=null)?h.odds[id]:null).filter(v=>v!=null);
+    if(pts.length<2) return '<svg width="52" height="16" aria-hidden="true"></svg>';
+    const max=Math.max(...pts,1), min=Math.min(...pts,0);
+    const span=(max-min)||1;
+    const isFav=id===favId;
+    const stroke=isFav?'var(--gold)':(pts[pts.length-1]>=pts[0]?'#5a6f5e':'#5a6f5e');
+    const coords=pts.map((v,i)=>{
+      const x=4+i*(44/(pts.length-1));
+      const y=14-((v-min)/span)*12;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return `<svg width="52" height="16" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="${stroke}" stroke-width="1.6"/></svg>`;
+  };
+
+  const body=rows.map(({o,pct})=>{
+    const isFav=o.id===favId;
+    const was = prior && prior.odds && prior.odds[o.id]!=null ? prior.odds[o.id] : null;
+    const delta = was!=null ? Math.round((pct-was)*10)/10 : null;
+    let deltaHTML='<span style="color:var(--muted)">—</span>';
+    if(delta!=null && Math.abs(delta)>=0.1){
+      const up=delta>0;
+      deltaHTML=`<span style="color:${up?'var(--up)':'var(--red-soft)'}">${up?'▲':'▼'} ${Math.abs(delta).toFixed(1)}</span>`;
+    } else if(delta!=null){
+      deltaHTML='<span style="color:var(--muted)">— 0.0</span>';
+    }
+    const wasHTML = was!=null ? `<span style="color:var(--muted);font-size:10px;margin-left:5px">was ${was.toFixed(1)}</span>` : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--edge2)${isFav?';background:var(--leadWash)':''}">
+      <span style="flex:1;min-width:0;font-size:14px;color:${isFav?'var(--cream)':'var(--cream)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.name)}${isFav?' <span style="color:var(--gold)">👑</span>':''}</span>
+      ${spark(o.id)}
+      <span style="width:52px;text-align:right;font-family:'Fraunces',serif;font-size:16px;font-weight:600;color:${isFav?'var(--gold)':'var(--cream)'};font-variant-numeric:tabular-nums">${pct.toFixed(1)}%</span>
+      <span style="width:96px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums">${deltaHTML}${wasHTML}</span>
+    </div>`;
+  }).join('');
+
+  const sub = priorRound!=null ? `vs round ${priorRound}` : 'this round';
+  return `<div class="panel" style="padding:12px 18px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <span style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em">WIN ODDS TREND</span>
+      <span style="font-size:11px;color:var(--muted)">${sub}</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
 // Shared cut-divider row: one continuous line — dashes · label · dashes.
 // Used by both the Pick 'Em team tables (colspan 4) and the Real Leaderboard (colspan 5).
 function cutDividerRowHTML(kind,score,colspan){
@@ -773,7 +888,8 @@ function cutDividerRowHTML(kind,score,colspan){
 function scoreStr(sc){ if(!sc)return '—'; const tag=doneStatus(sc); if(tag) return tag; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
-const ROWH = 62;
+const MOBILE_UI = window.matchMedia('(max-width:560px)').matches;
+const ROWH = MOBILE_UI ? 55 : 62;
 function renderBoard(){
   const st=computeStandings();
   const any=STATE.scores&&Object.keys(STATE.scores).length>0;
@@ -813,7 +929,12 @@ function renderBoard(){
   const hint=document.getElementById('lbHint');
   if(hint) hint.innerHTML=`Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Scores refresh automatically every 10 seconds — tap <b>Refresh scores</b> anytime for an immediate pull.`;
   const clBox=document.getElementById('cutLineBox');
-  if(clBox) clBox.innerHTML=renderCutLineBox();
+  if(clBox){
+    // Same slot, two occupants by phase: projected-cut widget during
+    // rounds 1-2, weekend win-odds trend panel once the cut is set.
+    const cutDone=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
+    clBox.innerHTML = cutDone ? renderWeekendPanel() : renderCutLineBox();
+  }
 
   // Cut-line divider context, shared by every team's table below:
   // before the cut is made, a gold dashed "PROJECTED CUT" line sits between
@@ -891,7 +1012,7 @@ function positionRows(st,bk,any,hasBk,instant){
     r.querySelector('.lb-who b').textContent=o.name;
     r.querySelector('.lb-who i').textContent=o.team||'';
     const cs=r.querySelector('.chipspot');
-    if(isFav){ cs.className='chip fav chipspot'; cs.textContent='👑 '+pct+'% FAV'; }
+    if(isFav){ cs.className='chip fav chipspot'; cs.textContent='👑 '+pct+'%'+(MOBILE_UI?'':' FAV'); }
     else if(hasBk && pct!=null){ cs.className='chip chipspot'; cs.textContent=pct+'%'; }
     else { cs.className='chip chipspot'; cs.textContent=any?'—':'·'; }
     const amt=r.querySelector('.lb-amt');
@@ -928,7 +1049,24 @@ function confettiIf(isNewLeader,node){
 }
 
 function renderGrid(){
-  const all={}; STATE.owners.forEach(o=>(o.picks||[]).forEach(g=>{all[g]=(all[g]||0)+1;}));
+  // Canonicalize golfer identity first, so nickname variants entered by
+  // different owners ("Matt Fitzpatrick" vs "Matthew Fitzpatrick") group as
+  // ONE golfer instead of appearing as two rows in two different tiers.
+  // Canonical key = the live feed's key when the golfer is in the scores
+  // (both spellings resolve to it), else a deterministic pick among the
+  // name's variants. Display name prefers the feed's official spelling.
+  const canonOf=(g)=>{ for(const k of nameKeys(g)){ if(STATE.scores&&STATE.scores[k]) return k; } return [...nameKeys(g)].sort()[0]; };
+  const info={}; // canonical key -> { display, ownersSet }
+  STATE.owners.forEach(o=>(o.picks||[]).forEach(g=>{
+    if(!g) return;
+    const c=canonOf(g);
+    if(!info[c]) info[c]={display:String(g), ownersSet:new Set()};
+    const sc=STATE.scores&&STATE.scores[c];
+    if(sc&&sc.name) info[c].display=sc.name;
+    else if(String(g).length>info[c].display.length) info[c].display=String(g);
+    info[c].ownersSet.add(o.id);
+  }));
+  const all={}; Object.keys(info).forEach(c=>all[c]=info[c].ownersSet.size);
   let golfers=Object.keys(all);
   golfers.sort((a,b)=>{ if(all[b]!==all[a])return all[b]-all[a];
     const pa=scoreFor(a),pb=scoreFor(b);
@@ -941,10 +1079,9 @@ function renderGrid(){
     const label=t===maxT?`Picked by all ${maxT}`:(t===1?'Unique — 1 owner':`${t} of ${maxT}`);
     rows+=`<tr class="tier-row ${t===maxT?'t4':t===maxT-1?'t3':''}"><td colspan="${owners.length+3}">${label}</td></tr>`;
     tiers[t].forEach(g=>{ const sc=scoreFor(g),tag=doneStatus(sc),isMC=!!tag;
-      const gKeys=nameKeys(g);
-      const checks=owners.map(o=>{ const has=(o.picks||[]).some(p=>{ const pKeys=nameKeys(p); return pKeys.some(pk=>gKeys.includes(pk)); });
+      const checks=owners.map(o=>{ const has=info[g].ownersSet.has(o.id);
         return has?`<td class="c"><span class="chk ${isMC?'no-cut':'yes'}">${isMC?'✕':'✓'}</span></td>`:'<td class="c"></td>'; }).join('');
-      rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(g)}${isMC?`<span class="mc-tag">${tag}</span>`:''}</td>
+      rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(info[g].display)}${isMC?`<span class="mc-tag">${tag}</span>`:''}</td>
         <td class="c pos">${sc?(isMC?'—':sc.pos):'—'}</td>
         <td class="c score" style="${isMC?'color:var(--red-soft)':''}">${scoreStr(sc)}</td>${checks}</tr>`; });
   }
@@ -1059,6 +1196,7 @@ function render(){
   if(view==='board')renderBoard(); else if(view==='grid')renderGrid(); else if(view==='real')renderReal(); else renderSetup();
   const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : '';
   document.getElementById('evLine').textContent = evn ? (evn + (STATE.purse?(' · '+fmt(STATE.purse)):'')) : '';
+  if(typeof updateRecapTicker==='function') updateRecapTicker();
 }
 
 /* =================== ADMIN EDITS =================== */
@@ -1235,6 +1373,127 @@ function toast(m,t){ const el=document.getElementById('toast'); el.textContent=m
 applyTheme();
 manualRefresh();
 startAutoRefresh();
+
+// ============ Recap ticker (ESPN bottom-line style) ============
+// Auto-generates a broadcast recap once per completed round, shows it scrolling
+// in a pinned bottom bar. Cached in-memory per round so we don't re-call the AI
+// on every 10s refresh — only when the round advances or the user hits ↺.
+let RECAP_STATE = { round:null, text:'', loading:false, dismissed:false };
+
+function currentRoundNumber(){
+  const rounds=Object.values(STATE.scores||{})
+    .filter(s=>s && typeof s.score==='number' && s.round!=null)
+    .map(s=>Number(s.round));
+  return rounds.length?Math.max(...rounds):null;
+}
+// A round is "recappable" when every live golfer has finished it (or we're past
+// it) — same completeness test the server uses for the synthetic cut, so a
+// recap only fires on a settled round, not mid-play.
+function roundIsComplete(round){
+  if(round==null) return false;
+  const live=Object.values(STATE.scores||{}).filter(s=>s && typeof s.score==='number' && !doneStatus(s));
+  if(!live.length) return false;
+  return live.every(s=>(s.round!=null) && (Number(s.round)>Number(round) ||
+    (Number(s.round)===Number(round) && s.thru!=null && Number(s.thru)>=18)));
+}
+
+function buildRecapBrief(){
+  const st=computeStandings(); // already ranked by total, tie-aware
+  const teams=st.map((o,i)=>{
+    // find this team's best-placed golfer for color
+    let best=null;
+    (o.rows||[]).forEach(r=>{
+      if(r.sc && typeof r.sc.score==='number' && !r.isMC){
+        const posN=parseInt(String(r.sc.pos).replace(/\D/g,''))||999;
+        if(!best || posN<best._p){ best={name:r.golfer,pos:r.sc.pos,score:scoreStr(r.sc),_p:posN}; }
+      }
+    });
+    return { name:o.team||o.name, owner:o.name, total:o.total, rank:i+1,
+      alive:o.alive, cut:o.mc, topGolfer:best?{name:best.name,pos:best.pos,score:best.score}:null };
+  });
+  // notable movers: best few scores across the whole field right now
+  const movers=Object.values(STATE.scores||{})
+    .filter(s=>s && typeof s.score==='number' && !doneStatus(s) && s.name)
+    .sort((a,b)=>a.score-b.score).slice(0,4)
+    .map(s=>({name:s.name,pos:s.pos,score:scoreStr(s)}));
+  return { round:currentRoundNumber(), eventName:STATE.event_name, teams, movers };
+}
+
+function renderRecapText(text){
+  const track=document.getElementById('rtTrack');
+  const bar=document.getElementById('recapTicker');
+  const reopen=document.getElementById('recapReopen');
+  if(!track||!bar) return;
+  if(RECAP_STATE.dismissed){ bar.style.display='none'; reopen.style.display=text?'block':'none'; return; }
+  if(!text){ bar.style.display='none'; return; }
+  // duplicate the text so the marquee reads continuously with no gap
+  track.textContent = text + '        ·        ' + text + '        ·        ';
+  bar.style.display='flex';
+  reopen.style.display='none';
+}
+
+async function fetchRecap(force){
+  const round=currentRoundNumber();
+  // Only generate for a completed round; skip if we already have this round's
+  // recap (unless the user forced a regenerate).
+  if(!force){
+    if(!roundIsComplete(round)) return;              // round still in play
+    if(RECAP_STATE.round===round && RECAP_STATE.text) return; // already have it
+  }
+  if(RECAP_STATE.loading) return;
+  RECAP_STATE.loading=true;
+  if(force) renderRecapText('Generating recap…');
+  try{
+    const brief=buildRecapBrief();
+    const r=await fetch('/api/recap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(brief)});
+    const data=await r.json();
+    if(r.ok && data.recap){
+      RECAP_STATE.round=round; RECAP_STATE.text=data.recap;
+      renderRecapText(data.recap);
+    } else if(force){
+      // fall back to a plain, deterministic line built from the numbers we trust
+      renderRecapText(buildFallbackRecap());
+    }
+  }catch(e){
+    if(force) renderRecapText(buildFallbackRecap());
+  }finally{ RECAP_STATE.loading=false; }
+}
+
+// Deterministic backup line — no AI, just the trusted numbers, so the ticker
+// is never empty if the AI call fails on a manual regenerate.
+function buildFallbackRecap(){
+  const st=computeStandings(); if(!st.length) return '';
+  const lead=st[0], last=st[st.length-1];
+  const money=(n)=>'$'+Number(n||0).toLocaleString('en-US');
+  return `${lead.team||lead.name} leads the pool at ${money(lead.total)}. · `+
+    `${st.length>1?(st[1].team||st[1].name)+' sits second at '+money(st[1].total)+'.':''} · `+
+    `${last.team||last.name} trails at ${money(last.total)}.`;
+}
+
+// Hook the ticker into each refresh cycle (called from the render path).
+function updateRecapTicker(){
+  if(RECAP_STATE.dismissed) return;
+  fetchRecap(false);
+}
+
+document.getElementById('rtRegen').addEventListener('click',()=>fetchRecap(true));
+document.getElementById('rtClose').addEventListener('click',()=>{
+  RECAP_STATE.dismissed=true;
+  document.getElementById('recapTicker').style.display='none';
+  document.getElementById('recapReopen').style.display=RECAP_STATE.text?'block':'none';
+});
+document.getElementById('recapReopen').addEventListener('click',()=>{
+  RECAP_STATE.dismissed=false;
+  document.getElementById('recapReopen').style.display='none';
+  renderRecapText(RECAP_STATE.text);
+});
 </script>
+<div id="recapTicker" class="recap-ticker" style="display:none">
+  <div class="rt-badge"><span class="rt-live"></span>POOL REPORT</div>
+  <div class="rt-scroll"><div class="rt-track" id="rtTrack"></div></div>
+  <button class="rt-btn" id="rtRegen" title="Regenerate recap" aria-label="Regenerate recap">↺</button>
+  <button class="rt-btn rt-close" id="rtClose" title="Hide" aria-label="Hide ticker">✕</button>
+</div>
+<button id="recapReopen" class="recap-reopen" style="display:none" title="Show pool report">📺 Pool Report</button>
 </body>
 </html>
