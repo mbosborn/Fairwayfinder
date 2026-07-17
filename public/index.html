@@ -357,13 +357,44 @@ function norm(name){
     .replace(/[óòö]/g,'o').replace(/[úü]/g,'u').replace(/ø/g,'o')
     .replace(/[^a-z ]/g,'').replace(/\s+/g,' ').trim();
 }
+// Common English first-name nickname groups — so "Matt Fitzpatrick" (e.g. from
+// the screenshot-fill feature, which naturally writes names the way people
+// actually say them) still matches "Matthew Fitzpatrick" (the fuller form
+// live feeds tend to use), without requiring an exact spelling match.
+const NICKNAME_GROUPS = [
+  ['matt','matthew'], ['chris','christopher'], ['mike','michael','mick'],
+  ['alex','alexander'], ['sam','samuel'], ['will','william','bill','billy'],
+  ['nick','nicholas'], ['zach','zachary','zack'], ['ben','benjamin'],
+  ['joe','joseph','joey'], ['tom','thomas','tommy'], ['dan','daniel','danny'],
+  ['rob','robert','bob','bobby'], ['jon','jonathan','john','johnny'],
+  ['cam','cameron'], ['tony','anthony'], ['ed','edward','eddie'],
+  ['rick','richard','dick','ricky'], ['greg','gregory'], ['steve','steven','stephen'],
+  ['dave','david','davey'], ['jim','james','jimmy'], ['charlie','charles','chuck'],
+  ['andy','andrew'], ['pat','patrick'], ['ken','kenneth','kenny'],
+  ['jeff','jeffrey'], ['brad','bradley'], ['josh','joshua'],
+  ['tim','timothy'], ['ted','theodore','teddy'], ['harry','harold'],
+];
+const NICKNAME_MAP = (() => {
+  const m = {};
+  for(const g of NICKNAME_GROUPS) for(const w of g) m[w]=g;
+  return m;
+})();
+function firstNameVariants(word){ return NICKNAME_MAP[word] || [word]; }
 function nameKeys(name){
   const n=norm(name); const keys=new Set([n]);
   if(n.includes(',')){ const [l,f]=n.split(',').map(s=>s.trim()); keys.add(norm(f+' '+l)); }
+  for(const k of [...keys]){
+    const parts=k.split(' ');
+    if(parts.length>=2){
+      for(const v of firstNameVariants(parts[0])){
+        if(v!==parts[0]) keys.add([v,...parts.slice(1)].join(' '));
+      }
+    }
+  }
   return [...keys];
 }
 
-let STATE = {event_name:'',purse:22500000,owners:[],scores:{},breakfast:{},field:[],updated_at:null};
+let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},field:[],updated_at:null};
 let dataLoaded=false; // true once the first real /api/state response has arrived
 let view='board';
 let prevOrder=[];      // for overtake arrows
@@ -445,6 +476,7 @@ function applyState(d){
   STATE = {
     event_name:d.event_name||STATE.event_name||'Tournament',
     purse:d.purse||STATE.purse||22500000,
+    purse_event_name:d.purse_event_name!==undefined?d.purse_event_name:STATE.purse_event_name,
     owners:d.owners||STATE.owners||[],
     scores:d.scores||STATE.scores||{},
     breakfast:d.breakfast||STATE.breakfast||{},
@@ -610,7 +642,8 @@ function renderGrid(){
     const label=t===maxT?`Picked by all ${maxT}`:(t===1?'Unique — 1 owner':`${t} of ${maxT}`);
     rows+=`<tr class="tier-row ${t===maxT?'t4':t===maxT-1?'t3':''}"><td colspan="${owners.length+3}">${label}</td></tr>`;
     tiers[t].forEach(g=>{ const sc=scoreFor(g),tag=doneStatus(sc),isMC=!!tag;
-      const checks=owners.map(o=>{ const has=(o.picks||[]).some(p=>norm(p)===norm(g));
+      const gKeys=nameKeys(g);
+      const checks=owners.map(o=>{ const has=(o.picks||[]).some(p=>{ const pKeys=nameKeys(p); return pKeys.some(pk=>gKeys.includes(pk)); });
         return has?`<td class="c"><span class="chk ${isMC?'no-cut':'yes'}">${isMC?'✕':'✓'}</span></td>`:'<td class="c"></td>'; }).join('');
       rows+=`<tr><td class="gname ${isMC?'mc':''}">${esc(g)}${isMC?`<span class="mc-tag">${tag}</span>`:''}</td>
         <td class="c pos">${sc?(isMC?'—':sc.pos):'—'}</td>
@@ -659,11 +692,14 @@ function renderSetup(){
     })()}</div>
     <button class="btn ghost" style="margin-top:10px;font-size:12px" onclick="addPick(${o.id})">+ Add golfer</button></div>`).join('');
   document.getElementById('view-setup').innerHTML=`<div class="panel"><div class="panel-head"><h2>Teams &amp; picks</h2><span class="meta">${STATE.owners.length} owners</span></div>
-    <div class="purse-edit" style="margin:0 0 16px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="purse-display" style="margin:0 0 16px;padding:12px 14px;border:1px solid var(--edge);border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <label style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.03em">TOURNAMENT PURSE</label>
-      <input class="inp sm" id="purseInput" value="${STATE.purse||''}" placeholder="e.g. 20000000 or 20m" style="max-width:150px">
-      <span style="font-size:12px;color:var(--muted)">Auto-fills from RapidAPI each time the event changes. Override here if it's ever wrong or missing, then Save changes.</span>
-      ${LAST_PURSE_ERROR ? `<div style="width:100%;margin-top:4px;padding:9px 12px;border:1px solid #5a2018;background:rgba(192,57,43,.12);border-radius:9px;color:var(--red-soft);font-weight:600;font-size:12.5px">Auto-purse lookup issue: ${esc(LAST_PURSE_ERROR)} — using the value above until it's fixed or you override it.</div>` : ''}
+      <span style="font-size:16px;font-weight:700;color:var(--cream)">${fmt(STATE.purse)}</span>
+      ${STATE.purse_event_name && STATE.purse_event_name===STATE.event_name
+        ? `<span class="verify-tag match" style="font-size:11px">✓ Confirmed for this event</span>`
+        : `<span class="verify-tag mismatch" style="font-size:11px">⚠ Not yet confirmed</span>`}
+      <span style="font-size:12px;color:var(--muted);width:100%">Pulled automatically once per tournament — not editable here, same as scores and prize money.</span>
+      ${LAST_PURSE_ERROR ? `<div style="width:100%;margin-top:4px;padding:9px 12px;border:1px solid #5a2018;background:rgba(192,57,43,.12);border-radius:9px;color:var(--red-soft);font-weight:600;font-size:12.5px">Auto-purse lookup issue: ${esc(LAST_PURSE_ERROR)} — showing the last known value above until this resolves on its own.</div>` : ''}
     </div>
     <div class="setup">${owners}<button class="btn primary" onclick="addOwner()">+ Add owner</button>
     <button class="btn" style="margin-left:8px" onclick="saveTeams()">Save changes</button></div>
@@ -715,24 +751,13 @@ async function saveTeams(){
     const ok = confirm('You are about to save with ZERO teams — this will erase everyone\'s picks. Are you sure?');
     if(!ok) return;
   }
-  // Purse: Data Golf doesn't provide this, so it's entered manually here.
-  // Accepts plain numbers ("20000000") or shorthand millions ("20m").
-  let purse = STATE.purse;
-  const purseEl = document.getElementById('purseInput');
-  const raw = purseEl ? String(purseEl.value||'').trim() : '';
-  if(raw){
-    const mShorthand = /^([\d.]+)\s*m$/i.exec(raw);
-    const parsed = mShorthand ? Math.round(parseFloat(mShorthand[1])*1000000) : parseInt(raw.replace(/[^0-9]/g,''),10);
-    if(!isNaN(parsed) && parsed>0) purse = parsed;
-  }
   try{
     const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({owners:STATE.owners, purse})});
+      body:JSON.stringify({owners:STATE.owners})});
     const d=await r.json();
     if(!r.ok){ toast(d.error||'Save failed','err'); return; }
-    STATE.purse = purse;
     builtSig=''; // owners may have changed; rebuild board shell next time
-    render(); // reflect the new purse immediately, without waiting for the next poll
+    render();
     toast('Saved — everyone\'s board updated');
   }catch(e){ toast('Save failed','err'); }
 }

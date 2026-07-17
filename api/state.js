@@ -22,6 +22,59 @@ function norm(name) {
     .replace(/[^a-z ]/g,'').replace(/\s+/g,' ').trim();
 }
 
+// Common English first-name nickname groups — so "Matt Fitzpatrick" (e.g. from
+// the screenshot-fill feature, which naturally writes names the way people
+// actually say them) still matches "Matthew Fitzpatrick" (the fuller form
+// live feeds tend to use), without requiring an exact spelling match.
+const NICKNAME_GROUPS = [
+  ['matt','matthew'], ['chris','christopher'], ['mike','michael','mick'],
+  ['alex','alexander'], ['sam','samuel'], ['will','william','bill','billy'],
+  ['nick','nicholas'], ['zach','zachary','zack'], ['ben','benjamin'],
+  ['joe','joseph','joey'], ['tom','thomas','tommy'], ['dan','daniel','danny'],
+  ['rob','robert','bob','bobby'], ['jon','jonathan','john','johnny'],
+  ['cam','cameron'], ['tony','anthony'], ['ed','edward','eddie'],
+  ['rick','richard','dick','ricky'], ['greg','gregory'], ['steve','steven','stephen'],
+  ['dave','david','davey'], ['jim','james','jimmy'], ['charlie','charles','chuck'],
+  ['andy','andrew'], ['pat','patrick'], ['ken','kenneth','kenny'],
+  ['jeff','jeffrey'], ['brad','bradley'], ['josh','joshua'],
+  ['tim','timothy'], ['ted','theodore','teddy'], ['harry','harold'],
+];
+const NICKNAME_MAP = (() => {
+  const m = {};
+  for (const g of NICKNAME_GROUPS) for (const w of g) m[w] = g;
+  return m;
+})();
+function firstNameVariants(word) { return NICKNAME_MAP[word] || [word]; }
+// Same shape as the front-end's nameKeys(): the plain normalized name, the
+// comma-swapped ("Last, First" -> "First Last") form, and nickname variants
+// of just the first word — tried in that order wherever a pick name needs to
+// be matched against a live-feed key.
+function nameKeys(name) {
+  const n = norm(name); const keys = new Set([n]);
+  if (n.includes(',')) {
+    const [l, f] = n.split(',').map(s => s.trim());
+    if (f && l) keys.add(norm(f + ' ' + l));
+  }
+  for (const k of [...keys]) {
+    const parts = k.split(' ');
+    if (parts.length >= 2) {
+      for (const v of firstNameVariants(parts[0])) {
+        if (v !== parts[0]) keys.add([v, ...parts.slice(1)].join(' '));
+      }
+    }
+  }
+  return [...keys];
+}
+// Resolve a raw pick name to whichever key actually exists in the live feeds
+// (scores or probs), trying nickname/comma variants — falls back to the plain
+// normalized name if nothing matches anywhere (e.g. a golfer not yet live).
+function resolvePickKey(rawName, scores, probs) {
+  for (const k of nameKeys(rawName)) {
+    if ((scores && scores[k]) || (probs && probs[k])) return k;
+  }
+  return norm(rawName);
+}
+
 // ---- RapidAPI Live Golf Data — reintroduced, but ONLY for purse lookup ----
 // Data Golf doesn't provide purse amounts, so this fills that one gap and
 // nothing else. It's best-effort and non-blocking: any failure here just
@@ -271,11 +324,16 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
   const probs = (dg && dg.players) || {};
   const fieldSize = 75;
 
+  // Resolve every pick name ONCE to whichever key actually exists in the live
+  // feeds (handles nicknames like "Matt" vs "Matthew" the same way everywhere
+  // below, instead of two separate spots each doing their own plain norm()).
+  const keyFor = {}; // rawPickName -> resolved key
+  owners.forEach(o => (o.picks||[]).forEach(g => { keyFor[g] = resolvePickKey(g, scores, probs); }));
+
   // Classify every unique golfer: frozen (known prize) vs live (simulate).
-  const frozen = {};   // normName -> fixed prize (number)
-  const samplers = {}; // normName -> sampler()
-  const uniq = new Set();
-  owners.forEach(o => (o.picks||[]).forEach(g => uniq.add(norm(g))));
+  const frozen = {};   // resolved key -> fixed prize (number)
+  const samplers = {}; // resolved key -> sampler()
+  const uniq = new Set(Object.values(keyFor));
 
   uniq.forEach(k => {
     const sc = scores ? scores[k] : null;
@@ -316,7 +374,7 @@ function simulateBreakfast(owners, dg, scores, prizeFn, eventFinal, runs = 5000)
     for (const o of owners) {
       let total = 0;
       for (const g of (o.picks||[])) {
-        const k = norm(g);
+        const k = keyFor[g];
         total += (k in frozen) ? frozen[k] : (drawn[k] || 0);
       }
       if (total < worstTotal - 0.0001) { worstTotal = total; worstId = o.id; tie.length = 0; tie.push(o.id); }
@@ -377,6 +435,8 @@ export default async function handler(req, res) {
       let scores = state?.scores || {};
       let purse = state?.purse || 22500000;
       let purseEventName = state?.purse_event_name || null;
+      let purseFailedAt = state?.purse_lookup_failed_at ? new Date(state.purse_lookup_failed_at).getTime() : 0;
+      let purseLastError = state?.purse_lookup_error || null;
       let eventName = state?.event_name;
       let breakfast = state?.breakfast || {};
 
@@ -414,14 +474,29 @@ export default async function handler(req, res) {
       // event we last successfully resolved a purse for. Any failure here just
       // leaves the existing purse (manually entered or previously fetched) —
       // never blocks scores/breakfast/field, which are all Data Golf already.
+      //
+      // Cooldown: if the last attempt failed (e.g. rate-limited), don't retry
+      // on every single refresh — that just adds more load to an endpoint
+      // that's already saying "slow down." Wait a few minutes between retries
+      // instead, and keep surfacing the last known error in the meantime.
+      const PURSE_RETRY_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
       if (eventName && eventName !== purseEventName) {
-        const pr = await fetchPurseFromRapid(eventName);
-        if (pr.purse) {
-          purse = pr.purse;
-          purseEventName = eventName;
-        } else if (pr.diag) {
-          purseErrorOut = pr.diag;
-          res.setHeader('x-purse-error', pr.diag);
+        const cooldownActive = purseFailedAt && (Date.now() - purseFailedAt < PURSE_RETRY_COOLDOWN_MS);
+        if (cooldownActive) {
+          purseErrorOut = purseLastError; // keep showing the last known issue, but don't re-attempt yet
+        } else {
+          const pr = await fetchPurseFromRapid(eventName);
+          if (pr.purse) {
+            purse = pr.purse;
+            purseEventName = eventName;
+            purseFailedAt = 0;
+            purseLastError = null;
+          } else if (pr.diag) {
+            purseErrorOut = pr.diag;
+            purseFailedAt = Date.now();
+            purseLastError = pr.diag;
+            res.setHeader('x-purse-error', pr.diag);
+          }
         }
       }
 
@@ -439,12 +514,23 @@ export default async function handler(req, res) {
         event_name: eventName,
         purse,
         purse_event_name: purseEventName,
+        purse_lookup_failed_at: purseFailedAt ? new Date(purseFailedAt).toISOString() : null,
+        purse_lookup_error: purseLastError,
         scores,
         breakfast,
         field,
         updated_at: new Date().toISOString(),
       };
-      await supabase.from('pool_state').update(patch).eq('id','main');
+      const { error: writeError } = await supabase.from('pool_state').update(patch).eq('id','main');
+      if (writeError) {
+        // A failed write here is serious — it means NOTHING in this refresh
+        // persisted (scores, breakfast, purse, all of it), even though the
+        // response below will still show fresh data for this one request.
+        // Surface it loudly instead of silently continuing as if it worked.
+        const msg = `Database write failed — this refresh did NOT save: ${writeError.message}`;
+        scoresErrorOut = scoresErrorOut ? `${scoresErrorOut} | ${msg}` : msg;
+        res.setHeader('x-write-error', writeError.message);
+      }
       state = { ...state, ...patch };
     }
     // else: either not asking to refresh, or a real fetch happened elsewhere

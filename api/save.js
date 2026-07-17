@@ -1,10 +1,16 @@
 // ============================================================
-// /api/save  — saves owners/teams + event info.
+// /api/save  — saves owners/teams + event name.
 //
 // BETA: open to everyone with the link — no admin password required.
 // (Revisit before a public/wide launch — add auth back if needed.)
 //
-// POST /api/save   body: { owners?, event_name?, purse? }
+// PURSE IS DELIBERATELY NOT ACCEPTED HERE. It's real money math — it should
+// be exactly as editable as a golfer's score or finishing position, which is
+// to say: not by anyone through this app. It's only ever set by the server's
+// own automated purse lookup in /api/state.js. Even if a request sends a
+// purse field, it's silently ignored below rather than trusted.
+//
+// POST /api/save   body: { owners?, event_name? }
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -19,12 +25,11 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { owners, event_name, purse } = body || {};
+    const { owners, event_name } = body || {}; // note: no `purse` — see comment above
 
     const patch = { updated_at: new Date().toISOString() };
     if (owners !== undefined)      patch.owners = owners;
     if (event_name !== undefined)  patch.event_name = event_name;
-    if (purse !== undefined)       patch.purse = purse;
 
     const { error } = await supabase
       .from('pool_state').update(patch).eq('id','main');
