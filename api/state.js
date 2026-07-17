@@ -280,28 +280,47 @@ async function fetchDataGolfLive() {
     }
 
     // ---- Projected cut line (the 2-3 most likely cut scores + probabilities) ----
-    // Data Golf's website shows this, but it's NOT confirmed whether their
-    // public /preds/in-play response exposes it the same way (vs. it being
-    // something only computed for their site). Try several plausible field
-    // names; if none match, surface the actual top-level keys so the next
-    // refresh settles this for certain instead of guessing again.
-    const cutCandidateFields = ['cut_lines','cutLines','cut_line','projected_cut','projected_cut_lines','cutline_probs','cut_probs'];
+    // Data Golf's website shows this, but their API docs don't list it. Search
+    // the entire response (top level AND one level nested, skipping the big
+    // player array) for ANY key containing "cut" — not just guessed names.
+    // If nothing is found, the diagnostic dumps the response's full structure
+    // minus player rows, so the question is settled definitively either way.
     let cutLine = null, cutLineDiag = null;
-    let cutLineRaw = null;
-    for (const f of cutCandidateFields) { if (data[f] != null) { cutLineRaw = data[f]; break; } }
+    let cutLineRaw = null, cutLineFoundAt = null;
+    const scanForCut = (obj, prefix) => {
+      for (const [k, v] of Object.entries(obj)) {
+        if (Array.isArray(v) && v.length > 20) continue; // skip the player rows array
+        if (/cut/i.test(k) && !/make_?cut/i.test(k)) { cutLineRaw = v; cutLineFoundAt = prefix + k; return true; }
+        if (v && typeof v === 'object' && !Array.isArray(v) && !prefix) {
+          if (scanForCut(v, k + '.')) return true;
+        }
+      }
+      return false;
+    };
+    scanForCut(data, '');
     if (cutLineRaw != null) {
-      // Shape is unknown until we actually see it — try common array-of-{score,prob} shapes.
       try {
         const arr = Array.isArray(cutLineRaw) ? cutLineRaw : Object.entries(cutLineRaw).map(([k,v]) => ({ score:k, prob:v }));
         cutLine = arr.map(x => ({
           score: x.score ?? x.cut_score ?? x.value ?? x[0],
           prob: (() => { const p = x.prob ?? x.probability ?? x.pct ?? x[1]; if (p == null) return null; const n = typeof p==='string' ? parseFloat(p.replace('%','')) : p; return isNaN(n) ? null : (n > 1 ? n/100 : n); })(),
         })).filter(x => x.score != null);
+        if (!cutLine.length) {
+          cutLine = null;
+          cutLineDiag = `found cut field "${cutLineFoundAt}" but no rows parsed — raw value: ${JSON.stringify(cutLineRaw).slice(0,300)}`;
+        }
       } catch (e) {
-        cutLineDiag = `found a cut-line field but couldn't parse its shape: ${JSON.stringify(cutLineRaw).slice(0,300)}`;
+        cutLineDiag = `found cut field "${cutLineFoundAt}" but couldn't parse its shape — raw value: ${JSON.stringify(cutLineRaw).slice(0,300)}`;
       }
     } else {
-      cutLineDiag = `no projected-cut-line field found in the in-play response — top-level keys present: ${Object.keys(data).join(', ')}`;
+      // Dump the whole response structure minus player rows: every top-level
+      // key with its type, and nested object keys one level deep.
+      const shape = Object.entries(data).map(([k,v]) => {
+        if (Array.isArray(v)) return `${k}[${v.length}]`;
+        if (v && typeof v === 'object') return `${k}{${Object.keys(v).join(',')}}`;
+        return `${k}=${JSON.stringify(v).slice(0,40)}`;
+      }).join(' | ');
+      cutLineDiag = `no cut-line field anywhere in the in-play response — full structure: ${shape}`;
     }
 
     return { live:true, players, scores, eventName, finalRound: maxRound, diag, cutLine, cutLineDiag };
@@ -480,7 +499,18 @@ export default async function handler(req, res) {
             res.setHeader('x-refresh-error', dg.diag);
           }
           if (dg.eventName) eventName = dg.eventName;
-          if (dg.cutLine && dg.cutLine.length) cutLine = dg.cutLine;
+          if (dg.cutLine && dg.cutLine.length) {
+            cutLine = dg.cutLine;
+          } else if (dg.cutLineDiag) {
+            // Persist the diagnostic INTO the cut_line column (it's jsonb, so
+            // it can hold either real data or this diag object). This way any
+            // viewer of /api/state sees the definitive answer about what Data
+            // Golf's response contains — not just the one lucky refresh
+            // request that happened to run the extraction. The front-end only
+            // uses cut_line when it's an Array, so a diag object here is
+            // ignored for display and the computed fallback stays in charge.
+            cutLine = { diag: dg.cutLineDiag, checked_at: new Date().toISOString() };
+          }
           if (dg.cutLineDiag) cutLineDiagOut = dg.cutLineDiag;
           if (dg.live) {
             scores = dg.scores;
