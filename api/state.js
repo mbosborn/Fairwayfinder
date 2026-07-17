@@ -258,15 +258,15 @@ async function fetchDataGolfLive() {
       //    reliable signal since only cut-qualifiers get a round 3/4 tee time.
       const posStr = String(rawPos ?? '').toUpperCase();
       if (/DQ/.test(posStr)) {
-        scores[key] = { pos: 'DQ', score: 'DQ' };
+        scores[key] = { pos: 'DQ', score: 'DQ', name: full };
       } else if (/WD/.test(posStr)) {
         const madeCutBeforeWD = rd != null && rd >= 3;
-        scores[key] = madeCutBeforeWD ? { pos: 'WD_PAID', score: 'WD_PAID' } : { pos: 'MC', score: 'MC' };
+        scores[key] = madeCutBeforeWD ? { pos: 'WD_PAID', score: 'WD_PAID', name: full } : { pos: 'MC', score: 'MC', name: full };
       } else if (/CUT/.test(posStr)) {
-        scores[key] = { pos: 'MC', score: 'MC' };
+        scores[key] = { pos: 'MC', score: 'MC', name: full };
       } else {
         const rawScore = p.current_score ?? p.score ?? p.total_to_par ?? p.total;
-        scores[key] = { pos: rawPos != null ? String(rawPos) : '', score: parToInt(rawScore) };
+        scores[key] = { pos: rawPos != null ? String(rawPos) : '', score: parToInt(rawScore), makeCut: num(p.make_cut), name: full, thru, round: rd };
       }
     }
     // Diagnostic: if we got rows but couldn't extract a single usable score,
@@ -278,7 +278,33 @@ async function fetchDataGolfLive() {
     if (rows.length && !anyScore) {
       diag = `got ${rows.length} in-play rows but no parsable score field — raw sample row: ${JSON.stringify(rows[0]).slice(0,400)}`;
     }
-    return { live:true, players, scores, eventName, finalRound: maxRound, diag };
+
+    // ---- Projected cut line (the 2-3 most likely cut scores + probabilities) ----
+    // Data Golf's website shows this, but it's NOT confirmed whether their
+    // public /preds/in-play response exposes it the same way (vs. it being
+    // something only computed for their site). Try several plausible field
+    // names; if none match, surface the actual top-level keys so the next
+    // refresh settles this for certain instead of guessing again.
+    const cutCandidateFields = ['cut_lines','cutLines','cut_line','projected_cut','projected_cut_lines','cutline_probs','cut_probs'];
+    let cutLine = null, cutLineDiag = null;
+    let cutLineRaw = null;
+    for (const f of cutCandidateFields) { if (data[f] != null) { cutLineRaw = data[f]; break; } }
+    if (cutLineRaw != null) {
+      // Shape is unknown until we actually see it — try common array-of-{score,prob} shapes.
+      try {
+        const arr = Array.isArray(cutLineRaw) ? cutLineRaw : Object.entries(cutLineRaw).map(([k,v]) => ({ score:k, prob:v }));
+        cutLine = arr.map(x => ({
+          score: x.score ?? x.cut_score ?? x.value ?? x[0],
+          prob: (() => { const p = x.prob ?? x.probability ?? x.pct ?? x[1]; if (p == null) return null; const n = typeof p==='string' ? parseFloat(p.replace('%','')) : p; return isNaN(n) ? null : (n > 1 ? n/100 : n); })(),
+        })).filter(x => x.score != null);
+      } catch (e) {
+        cutLineDiag = `found a cut-line field but couldn't parse its shape: ${JSON.stringify(cutLineRaw).slice(0,300)}`;
+      }
+    } else {
+      cutLineDiag = `no projected-cut-line field found in the in-play response — top-level keys present: ${Object.keys(data).join(', ')}`;
+    }
+
+    return { live:true, players, scores, eventName, finalRound: maxRound, diag, cutLine, cutLineDiag };
   } catch (e) {
     return { live:false, players:{}, scores:{}, eventName:null, diag:'Data Golf in-play request threw: ' + e.message };
   }
@@ -422,6 +448,7 @@ export default async function handler(req, res) {
     let fieldErrorOut = null; // surfaced to the UI so field-fetch problems are self-diagnosing
     let scoresErrorOut = null; // surfaced to the UI so scores-fetch problems are self-diagnosing
     let purseErrorOut = null; // surfaced to the UI so purse-lookup problems are self-diagnosing
+    let cutLineDiagOut = null; // surfaced so we can tell for certain whether Data Golf's API exposes a cut-line field
 
     const lastUpdatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
     const ageMs = Date.now() - lastUpdatedMs;
@@ -439,6 +466,7 @@ export default async function handler(req, res) {
       let purseLastError = state?.purse_lookup_error || null;
       let eventName = state?.event_name;
       let breakfast = state?.breakfast || {};
+      let cutLine = state?.cut_line || null;
 
       if (!process.env.DATAGOLF_KEY) {
         // no key configured — nothing to do, leave prior state as-is
@@ -452,6 +480,8 @@ export default async function handler(req, res) {
             res.setHeader('x-refresh-error', dg.diag);
           }
           if (dg.eventName) eventName = dg.eventName;
+          if (dg.cutLine && dg.cutLine.length) cutLine = dg.cutLine;
+          if (dg.cutLineDiag) cutLineDiagOut = dg.cutLineDiag;
           if (dg.live) {
             scores = dg.scores;
             // eventFinal isn't directly knowable from this feed (no explicit
@@ -519,6 +549,7 @@ export default async function handler(req, res) {
         scores,
         breakfast,
         field,
+        cut_line: cutLine,
         updated_at: new Date().toISOString(),
       };
       const { error: writeError } = await supabase.from('pool_state').update(patch).eq('id','main');
@@ -539,7 +570,7 @@ export default async function handler(req, res) {
     // with each other and with whatever the last real fetch produced.
 
     res.setHeader('Cache-Control','no-store');
-    return res.status(200).json({ ...(state||{}), _fieldError: fieldErrorOut, _scoresError: scoresErrorOut, _purseError: purseErrorOut });
+    return res.status(200).json({ ...(state||{}), _fieldError: fieldErrorOut, _scoresError: scoresErrorOut, _purseError: purseErrorOut, _cutLineDiag: cutLineDiagOut });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

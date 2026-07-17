@@ -145,6 +145,15 @@
   tbody td.c{text-align:center}
   .gname{font-weight:600;font-family:'Fraunces',serif}.gname.mc{color:var(--red-soft)}
   .mc-tag{font-size:9px;color:var(--red-soft);font-weight:700;margin-left:6px}
+  /* Cut-line dividers inside team tables */
+  .cut-divider td{padding:3px 20px 5px;text-align:center;font-size:9.5px;letter-spacing:.12em;font-weight:800}
+  .cut-divider.proj td{border-top:2px dashed var(--gold);color:var(--gold)}
+  .cut-divider.final td{border-top:2px solid var(--red-soft);color:var(--red-soft)}
+  /* Links-course side decorations — original line art, only on wide screens */
+  .decor{position:fixed;top:24vh;width:230px;color:var(--gold);opacity:.07;pointer-events:none;z-index:0}
+  #decorL{left:2.5vw}
+  #decorR{right:2.5vw}
+  @media(max-width:1499px){.decor{display:none}}
   .score{font-weight:700}.prize{color:var(--mist);font-weight:700}.pos{color:var(--muted);font-weight:700}
   .chk{display:inline-flex;align-items:center;justify-content:center;width:23px;height:23px;border-radius:6px;font-size:12px;font-weight:800}
   .chk.yes{background:var(--gold);color:#071008}.chk.no-cut{background:var(--watchB);color:#fff}
@@ -259,14 +268,38 @@
   </div>
 </div>
 
+<div class="decor" id="decorL" aria-hidden="true">
+  <svg viewBox="0 0 220 460" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <line x1="120" y1="30" x2="120" y2="300"/>
+    <path d="M120 30 L188 55 L120 82 Z" fill="currentColor" stroke="none"/>
+    <ellipse cx="120" cy="304" rx="13" ry="4.5"/>
+    <path d="M18 336 Q120 306 205 340"/>
+    <path d="M8 372 Q118 336 212 376"/>
+    <path d="M14 412 Q120 372 208 416"/>
+    <circle cx="58" cy="352" r="3.5" fill="currentColor" stroke="none"/>
+  </svg>
+</div>
+<div class="decor" id="decorR" aria-hidden="true">
+  <svg viewBox="0 0 220 460" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <path d="M42 66 Q14 96 46 116 Q96 140 132 114 Q166 90 130 66 Q84 42 42 66 Z"/>
+    <path d="M66 86 Q92 100 118 88"/>
+    <path d="M148 148 Q128 168 152 182 Q186 198 202 176 Q214 158 190 146 Q166 136 148 148 Z"/>
+    <path d="M16 262 q22 -14 44 0 t44 0 t44 0 t44 0"/>
+    <path d="M16 296 q22 -14 44 0 t44 0 t44 0 t44 0"/>
+    <path d="M16 330 q22 -14 44 0 t44 0 t44 0 t44 0"/>
+    <path d="M16 364 q22 -14 44 0 t44 0 t44 0 t44 0"/>
+  </svg>
+</div>
 <div class="wrap">
   <div class="tabs">
     <button class="tab active" data-view="board" onclick="setView('board')">Leaderboard</button>
     <button class="tab" data-view="grid" onclick="setView('grid')">Picks Grid</button>
+    <button class="tab" data-view="real" onclick="setView('real')">Real Leaderboard</button>
     <button class="tab" data-view="setup" id="setupTab" onclick="setView('setup')">Teams</button>
   </div>
   <div id="view-board"></div>
   <div id="view-grid" style="display:none"></div>
+  <div id="view-real" style="display:none"></div>
   <div id="view-setup" style="display:none"></div>
 </div>
 
@@ -394,7 +427,7 @@ function nameKeys(name){
   return [...keys];
 }
 
-let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},field:[],updated_at:null};
+let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},field:[],cut_line:null,updated_at:null};
 let dataLoaded=false; // true once the first real /api/state response has arrived
 let view='board';
 let prevOrder=[];      // for overtake arrows
@@ -481,6 +514,7 @@ function applyState(d){
     scores:d.scores||STATE.scores||{},
     breakfast:d.breakfast||STATE.breakfast||{},
     field:d.field||STATE.field||[],
+    cut_line:d.cut_line!==undefined?d.cut_line:STATE.cut_line,
     updated_at:d.updated_at||STATE.updated_at
   };
   applyTheme();
@@ -498,7 +532,7 @@ sb.channel('pool')
 function setView(v){
   view=v;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===v));
-  ['board','grid','setup'].forEach(x=>document.getElementById('view-'+x).style.display=x===v?'':'none');
+  ['board','grid','real','setup'].forEach(x=>document.getElementById('view-'+x).style.display=x===v?'':'none');
   if(v!=='board') builtSig=''; // force fresh build when returning to board
   render();
 }
@@ -515,6 +549,32 @@ function computeStandings(){
   }).sort((a,b)=>b.total-a.total);
 }
 function fmt(n){return '$'+(n||0).toLocaleString('en-US');}
+function parToStr(n){
+  if(n==null) return '—';
+  const v=Number(n);
+  if(isNaN(v)) return String(n);
+  if(v===0) return 'E';
+  return v>0 ? '+'+v : String(v);
+}
+// Projected cut line — Data Golf's "2-3 most likely cut scores, with
+// probabilities" widget. Quietly renders nothing if this data isn't available
+// (e.g. before the tournament starts, after the cut is already final, or if
+// the feed doesn't expose it) rather than showing an empty/broken box.
+function renderCutLineBox(){
+  const cl=STATE.cut_line;
+  if(!cl || !Array.isArray(cl) || !cl.length) return '';
+  const sorted=[...cl].filter(x=>x && x.score!=null).sort((a,b)=>(b.prob||0)-(a.prob||0)).slice(0,3);
+  if(!sorted.length) return '';
+  const items=sorted.map(x=>`
+    <div style="text-align:center;min-width:70px">
+      <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:700;color:var(--cream)">${esc(parToStr(x.score))}</div>
+      <div style="font-size:12px;color:var(--gold);font-weight:700">${x.prob!=null?Math.round(x.prob*100)+'%':'—'}</div>
+    </div>`).join('');
+  return `<div class="panel" style="padding:14px 20px;margin-bottom:14px">
+    <div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.03em;margin-bottom:10px">PROJECTED CUT LINE</div>
+    <div style="display:flex;gap:24px">${items}</div>
+  </div>`;
+}
 function scoreStr(sc){ if(!sc)return '—'; const tag=doneStatus(sc); if(tag) return tag; const s=sc.score; if(s===0||s==='E')return 'E'; if(typeof s==='number')return s>0?'+'+s:''+s; return s; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
@@ -531,7 +591,7 @@ function renderBoard(){
 
   // (re)build the shell if the set of owners changed or first render
   if(builtSig!==sig){
-    let head=`<div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}<h2>Standings</h2><span class="meta" id="updMeta"></span></div>`;
+    let head=`<div id="cutLineBox"></div><div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}<h2>Standings</h2><span class="meta" id="updMeta"></span></div>`;
     head+=`<div class="lb-colhd"><div class="a">Pos</div><div class="b">Owner</div><div class="c">Breakfast</div><div class="d">Earnings</div></div>`;
     head+=`<div class="lb-rows" id="lbRows" style="height:${st.length*ROWH}px"></div>`;
     head+=`<div class="hint" id="lbHint"></div></div><div id="lbDetail"></div>`;
@@ -557,13 +617,47 @@ function renderBoard(){
   const um=document.getElementById('updMeta'); if(um) um.textContent='Updated: '+upd;
   const hint=document.getElementById('lbHint');
   if(hint) hint.innerHTML=`Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Scores refresh automatically every 10 seconds — tap <b>Refresh scores</b> anytime for an immediate pull.`;
+  const clBox=document.getElementById('cutLineBox');
+  if(clBox) clBox.innerHTML=renderCutLineBox();
+
+  // Cut-line divider context, shared by every team's table below:
+  // before the cut is made, a gold dashed "PROJECTED CUT" line sits between
+  // golfers above/below the most likely cut score; once anyone has actually
+  // been cut, it becomes a red solid "CUT LINE" between live and cut golfers.
+  const projCutScore=(()=>{ const cl=STATE.cut_line; if(!cl||!Array.isArray(cl)||!cl.length) return null;
+    const s=[...cl].filter(x=>x&&x.score!=null).sort((a,b)=>(b.prob||0)-(a.prob||0));
+    const v=s.length?Number(s[0].score):NaN; return isNaN(v)?null:v; })();
+  const cutHappened=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
+  const cutDividerRow=(kind,score)=>`<tr class="cut-divider ${kind}"><td colspan="4"><span>${kind==='final'?'CUT LINE':'PROJECTED CUT '+esc(parToStr(score))}</span></td></tr>`;
 
   const detail=st.map(o=>{
-    const sorted=[...o.rows].sort((a,b)=>b.prize-a.prize||(a.isMC?1:0)-(b.isMC?1:0));
-    const body=sorted.map(r=>`<tr><td class="gname ${r.isMC?'mc':''}">${esc(r.golfer)}${r.isMC?`<span class="mc-tag">${r.tag}</span>`:''}</td>
+    const sorted=[...o.rows].sort((a,b)=>{
+      // Done (missed cut / DQ / withdrew) always sinks below anyone still live,
+      // regardless of prize amount — matches a real leaderboard's shape.
+      if(a.isMC!==b.isMC) return a.isMC?1:-1;
+      if(a.isMC && b.isMC) return 0; // both done — relative order doesn't matter
+      // Both still live: sort by actual score, best (lowest) first. This is the
+      // real fix — sorting by prize alone left ties (very common, since payout
+      // brackets are broad) in arbitrary order instead of true score order.
+      const as=(a.sc && typeof a.sc.score==='number')?a.sc.score:Infinity;
+      const bs=(b.sc && typeof b.sc.score==='number')?b.sc.score:Infinity;
+      return as-bs;
+    });
+    let body='', dividerDone=false;
+    sorted.forEach((r,i)=>{
+      if(!dividerDone && i>0){
+        if(cutHappened){
+          if(r.isMC){ body+=cutDividerRow('final'); dividerDone=true; }
+        } else if(projCutScore!=null){
+          const s=(r.sc && typeof r.sc.score==='number')?r.sc.score:null;
+          if(s!=null && s>projCutScore){ body+=cutDividerRow('proj',projCutScore); dividerDone=true; }
+        }
+      }
+      body+=`<tr><td class="gname ${r.isMC?'mc':''}">${esc(r.golfer)}${r.isMC?`<span class="mc-tag">${r.tag}</span>`:''}</td>
       <td class="c pos">${r.sc?(r.isMC?'—':r.sc.pos):'—'}</td>
       <td class="c score" style="${r.isMC?'color:var(--red-soft)':''}">${scoreStr(r.sc)}</td>
-      <td class="c prize">${r.prize?fmt(r.prize):'—'}</td></tr>`).join('');
+      <td class="c prize">${r.prize?fmt(r.prize):'—'}</td></tr>`;
+    });
     return `<div class="panel"><div class="panel-head"><h2>${esc(o.name)} <span style="color:var(--muted);font-weight:600">· ${esc(o.team||'')}</span></h2><span class="meta">${fmt(o.total)}</span></div>
       <table><thead><tr><th>Golfer</th><th class="c">Pos</th><th class="c">Score</th><th class="c">Prize</th></tr></thead>
       <tbody>${body}<tr class="total-row"><td>Total</td><td></td><td></td><td class="c prize">${fmt(o.total)}</td></tr></tbody></table></div>`;
@@ -653,6 +747,41 @@ function renderGrid(){
   document.getElementById('view-grid').innerHTML=`<div class="panel"><div class="panel-head"><h2>Picks Grid</h2><span class="meta">${golfers.length} golfers · ${owners.length} owners</span></div><table><thead>${head}</thead><tbody>${rows||'<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--muted)">Teams not set yet.</td></tr>'}</tbody></table><div class="hint">Green ✓ = made cut · red ✕ = missed cut. Grouped by how many owners share each golfer — the unique picks at the bottom are where pools are won and lost.</div></div>`;
 }
 
+// Real Leaderboard — the actual tournament field (not just picked golfers),
+// refreshing on the same cycle as everything else. Marks which golfers are
+// picked in this pool, so it doubles as quick context, not just a mirror of
+// a real golf site.
+function renderReal(){
+  const scores=STATE.scores||{};
+  const pickedKeys=new Set();
+  STATE.owners.forEach(o=>(o.picks||[]).forEach(p=>{ nameKeys(p).forEach(k=>pickedKeys.add(k)); }));
+
+  const entries=Object.entries(scores).map(([key,sc])=>({key,sc,tag:doneStatus(sc)}));
+  entries.sort((a,b)=>{
+    if(!!a.tag!==!!b.tag) return a.tag?1:-1; // done (MC/DQ/WD) sinks to bottom
+    if(a.tag&&b.tag) return (a.sc.name||'').localeCompare(b.sc.name||'');
+    const as=typeof a.sc.score==='number'?a.sc.score:9999;
+    const bs=typeof b.sc.score==='number'?b.sc.score:9999;
+    return as-bs;
+  });
+
+  const rows=entries.map(({key,sc,tag})=>{
+    const isPicked=pickedKeys.has(key);
+    const thru=(!tag && sc.thru!=null)?(sc.thru>=18?'F':String(sc.thru)):'—';
+    const cutOdds=(!tag && sc.makeCut!=null)?Math.round(sc.makeCut*100)+'%':'—';
+    return `<tr>
+      <td class="c pos">${tag?'—':esc(sc.pos||'—')}</td>
+      <td class="gname ${tag?'mc':''}">${esc(sc.name||key)}${tag?`<span class="mc-tag">${tag}</span>`:''}${isPicked?' <span title="Picked in this pool" style="color:var(--gold)">●</span>':''}</td>
+      <td class="c score" style="${tag?'color:var(--red-soft)':''}">${scoreStr(sc)}</td>
+      <td class="c">${thru}</td>
+      <td class="c">${cutOdds}</td>
+    </tr>`;
+  }).join('');
+
+  const head=`<tr><th class="c">Pos</th><th>Golfer</th><th class="c">Score</th><th class="c">Thru</th><th class="c">Cut Odds</th></tr>`;
+  document.getElementById('view-real').innerHTML=`<div class="panel"><div class="panel-head"><h2>Real Leaderboard</h2><span class="meta">${entries.length} players${STATE.event_name?' · '+esc(STATE.event_name):''}</span></div><table><thead>${head}</thead><tbody>${rows||'<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--muted)">No live scores yet — check back once the round starts.</td></tr>'}</tbody></table><div class="hint">The actual tournament field, refreshing the same as everything else. <span style="color:var(--gold)">●</span> marks a golfer picked in this pool.</div></div>`;
+}
+
 function pickOptionsHTML(field, current, takenSet){
   const opts = ['<option value="">Select golfer…</option>'];
   // always include the current pick even if it's not in the field (e.g. WD, or field not loaded yet)
@@ -708,7 +837,7 @@ function renderSetup(){
     </div></div>`;
 }
 function render(){
-  if(view==='board')renderBoard(); else if(view==='grid')renderGrid(); else renderSetup();
+  if(view==='board')renderBoard(); else if(view==='grid')renderGrid(); else if(view==='real')renderReal(); else renderSetup();
   const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : '';
   document.getElementById('evLine').textContent = evn ? (evn + (STATE.purse?(' · '+fmt(STATE.purse)):'')) : '';
 }
