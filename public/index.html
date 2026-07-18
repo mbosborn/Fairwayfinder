@@ -147,6 +147,17 @@
   tbody td.c{text-align:center}
   .gname{font-weight:600;font-family:'Fraunces',serif}.gname.mc{color:var(--red-soft)}
   .mc-tag{font-size:9px;color:var(--red-soft);font-weight:700;margin-left:6px}
+  /* Sub-tabs inside the Standings panel header (Standings | Win Odds Trend) */
+  .sub-tabs{display:flex;gap:4px}
+  .sub-tab{background:transparent;border:none;cursor:pointer;font-family:'Fraunces',serif;
+    font-size:19px;font-weight:700;color:var(--muted);padding:0 2px;transition:color .2s;letter-spacing:.01em}
+  .sub-tab:hover{color:var(--cream)}
+  .sub-tab.active{color:var(--cream)}
+  .sub-tab:not(:last-child){margin-right:14px;position:relative}
+  .sub-tab:not(:last-child)::after{content:'';position:absolute;right:-8px;top:50%;transform:translateY(-50%);
+    width:1px;height:15px;background:var(--edge2)}
+  .sub-tab.active::before{content:'';position:absolute;left:0;right:0;bottom:-6px;height:2px;background:var(--gold);border-radius:2px}
+  .sub-tab{position:relative;padding-bottom:2px}
   /* ESPN-style pinned recap ticker */
   .recap-ticker{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:stretch;height:38px;
     background:linear-gradient(180deg,#0b120e,#060a07);border-top:1px solid var(--gold);
@@ -598,6 +609,7 @@ function nameKeys(name){
 let STATE = {event_name:'',purse:22500000,purse_event_name:null,owners:[],scores:{},breakfast:{},odds_history:[],field:[],cut_line:null,updated_at:null};
 let dataLoaded=false; // true once the first real /api/state response has arrived
 let view='board';
+let boardSub='standings'; // sub-tab within the Pick 'Em board: 'standings' | 'trend'
 let prevOrder=[];      // for overtake arrows
 let lbNodes={};        // owner id -> row element
 let builtSig='';       // signature of current row set (to know when to rebuild vs animate)
@@ -705,6 +717,18 @@ function setView(v){
   ['board','grid','real','setup'].forEach(x=>document.getElementById('view-'+x).style.display=x===v?'':'none');
   if(v!=='board') builtSig=''; // force fresh build when returning to board
   render();
+}
+function setBoardSub(s){
+  boardSub=s;
+  document.querySelectorAll('.sub-tab').forEach(t=>{
+    const isTrend=t.textContent.toLowerCase().includes('trend');
+    t.classList.toggle('active', s==='trend' ? isTrend : !isTrend);
+  });
+  const std=document.getElementById('subStandings');
+  const trd=document.getElementById('subTrend');
+  if(std) std.style.display = s==='trend'?'none':'';
+  if(trd) trd.style.display = s==='trend'?'':'none';
+  if(s==='trend' && trd) trd.innerHTML=renderWeekendPanel(true);
 }
 function computeStandings(){
   return STATE.owners.map(o=>{
@@ -820,7 +844,7 @@ function renderCutLineBox(){
 // come from odds_history (recorded server-side at round boundaries); if no
 // history exists yet (e.g. first weekend refresh), it degrades to just the
 // current odds with no arrows.
-function renderWeekendPanel(){
+function renderWeekendPanel(embedded){
   const bk=STATE.breakfast||{};
   const owners=STATE.owners||[];
   if(!owners.length || !Object.keys(bk).length) return '';
@@ -871,13 +895,15 @@ function renderWeekendPanel(){
   }).join('');
 
   const sub = priorRound!=null ? `vs round ${priorRound}` : 'this round';
-  return `<div class="panel" style="padding:12px 18px;margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <span style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em">WIN ODDS TREND</span>
+  const inner = `<div style="display:flex;align-items:center;justify-content:${embedded?'flex-end':'space-between'};margin-bottom:6px">
+      ${embedded?'':`<span style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em">WIN ODDS TREND</span>`}
       <span style="font-size:11px;color:var(--muted)">${sub}</span>
     </div>
-    ${body}
-  </div>`;
+    ${body}`;
+  // Embedded (inside the Standings tab): no outer panel/header — the tab and
+  // its parent .panel already provide that chrome.
+  if(embedded) return `<div style="padding:4px 20px 16px">${inner}</div>`;
+  return `<div class="panel" style="padding:12px 18px;margin-bottom:14px">${inner}</div>`;
 }
 
 // Shared cut-divider row: one continuous line — dashes · label · dashes.
@@ -902,10 +928,29 @@ function renderBoard(){
 
   // (re)build the shell if the set of owners changed or first render
   if(builtSig!==sig){
-    let head=`<div id="cutLineBox"></div><div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}<h2>Standings</h2><span class="meta" id="updMeta"></span></div>`;
+    const cutDone=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
+    // Post-cut, the Standings panel gains a second tab for the Win Odds Trend
+    // (replaces the old separate panel that sat above). Pre-cut, no trend tab —
+    // that data only becomes a story on the weekend — and the cut-line widget
+    // occupies the slot above instead.
+    let head=`<div id="cutLineBox"></div><div class="panel"><div class="panel-head">${any?'<span class="live-dot"></span>':''}`;
+    if(cutDone){
+      head+=`<div class="sub-tabs">
+        <button class="sub-tab ${boardSub==='standings'?'active':''}" onclick="setBoardSub('standings')">Standings</button>
+        <button class="sub-tab ${boardSub==='trend'?'active':''}" onclick="setBoardSub('trend')">Win Odds Trend</button>
+      </div>`;
+    } else {
+      head+=`<h2>Standings</h2>`;
+    }
+    head+=`<span class="meta" id="updMeta"></span></div>`;
+    // Standings sub-view (col header + animated rows)
+    head+=`<div id="subStandings" style="${boardSub==='trend'&&cutDone?'display:none':''}">`;
     head+=`<div class="lb-colhd"><div class="a">Pos</div><div class="b">Owner</div><div class="c">Win Odds</div><div class="d">Earnings</div></div>`;
     head+=`<div class="lb-rows" id="lbRows" style="height:${st.length*ROWH}px"></div>`;
-    head+=`<div class="hint" id="lbHint"></div></div><div id="lbDetail"></div>`;
+    head+=`<div class="hint" id="lbHint"></div></div>`;
+    // Win Odds Trend sub-view (only rendered post-cut)
+    head+=`<div id="subTrend" style="${boardSub==='trend'&&cutDone?'':'display:none'}"></div>`;
+    head+=`</div><div id="lbDetail"></div>`;
     container.innerHTML=head;
     lbNodes={};
     const rowsEl=document.getElementById('lbRows');
@@ -929,12 +974,15 @@ function renderBoard(){
   const hint=document.getElementById('lbHint');
   if(hint) hint.innerHTML=`Prize totals use the ${esc(STATE.event_name)} purse by finishing position. Scores refresh automatically every 10 seconds — tap <b>Refresh scores</b> anytime for an immediate pull.`;
   const clBox=document.getElementById('cutLineBox');
+  const cutDone2=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
   if(clBox){
-    // Same slot, two occupants by phase: projected-cut widget during
-    // rounds 1-2, weekend win-odds trend panel once the cut is set.
-    const cutDone=Object.values(STATE.scores||{}).some(s=>s&&s.pos==='MC');
-    clBox.innerHTML = cutDone ? renderWeekendPanel() : renderCutLineBox();
+    // Above the panel: projected-cut widget during rounds 1-2 only. Post-cut
+    // the trend moved INTO the Standings panel as a tab, so this clears.
+    clBox.innerHTML = cutDone2 ? '' : renderCutLineBox();
   }
+  // Fill the trend sub-view when it's the active tab
+  const trendEl=document.getElementById('subTrend');
+  if(trendEl && cutDone2) trendEl.innerHTML=renderWeekendPanel(true);
 
   // Cut-line divider context, shared by every team's table below:
   // before the cut is made, a gold dashed "PROJECTED CUT" line sits between
