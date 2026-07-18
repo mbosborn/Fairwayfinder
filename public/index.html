@@ -15,6 +15,7 @@
     --gold:#43c948;--goldB:#7ce07f;--cream:#eef2ee;--muted:#8d978d;--accent:#43c948;
     --crestA:#16321f;--crestB:#0a1810;--glow:rgba(67,201,72,.25);
     --hdWash:rgba(20,40,30,.4);--bannerBg:#0e3a23;--bannerTx:#7ce07f;
+    --hdBannerA:#12402a;--hdBannerB:rgba(10,28,18,.9);
     --leadWash:linear-gradient(90deg,rgba(255,210,74,.12),transparent 60%);
     --watchA:#8a2a1e;--watchB:#c0392b;--watchEdge:#c0392b;--watchGlow:rgba(192,57,43,.5);--watchGlow2:rgba(255,107,90,.75);
     --watchRow:linear-gradient(90deg,rgba(192,57,43,.18),transparent 70%);
@@ -26,23 +27,31 @@
   body{padding:0 0 80px}
 
   /* ---------- top bar ---------- */
-  .topbar{position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);
-    background:linear-gradient(180deg, var(--hdWash), rgba(8,13,10,.85));
-    border-bottom:1px solid var(--edge);padding:11px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .brand{display:flex;align-items:center;gap:11px;margin-right:auto;min-width:0}
+  .topbar{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px)}
+  .topbar-inner{position:relative;background:linear-gradient(180deg,var(--hdBannerA) 0%,var(--hdBannerB) 45%,rgba(8,13,10,.92) 100%);
+    padding:15px 22px;display:flex;align-items:center;gap:18px;overflow:hidden;border-bottom:1px solid rgba(232,200,119,.25)}
+  .tb-glow{position:absolute;inset:0;background:radial-gradient(60% 160% at 22% 0%,rgba(232,200,119,.15),transparent 55%);pointer-events:none}
+  .brand{position:relative;display:flex;align-items:center;gap:11px;flex:none;min-width:0}
   .crest{width:38px;height:38px;border-radius:50%;border:2px solid var(--gold);flex:none;
     display:flex;align-items:center;justify-content:center;font-size:18px;
     background:radial-gradient(circle at 30% 30%, var(--crestA), var(--crestB));box-shadow:0 0 14px var(--glow)}
-  .brand .name{font-family:'Fraunces',serif;font-size:20px;font-weight:900;letter-spacing:-.01em;line-height:1}
+  .brand .name{font-family:'Fraunces',serif;font-size:19px;font-weight:900;letter-spacing:-.01em;line-height:1}
   .brand .name .f{color:var(--goldB)}
   .brand .sub{font-size:9.5px;color:var(--muted);font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .brand .sub .hl{color:var(--accent)}
-  .evbox{text-align:right;margin-right:2px}
-  .evbox .ev{font-family:'Fraunces',serif;font-style:italic;color:var(--goldB);font-size:12px;line-height:1.2}
+  /* centered tournament title — non-interactive overlay */
+  .tb-title{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;pointer-events:none;padding:0 240px}
+  .tb-eyebrow{font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--goldB);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tb-name{font-family:'Fraunces',serif;font-weight:900;font-size:29px;color:#f7ecd2;line-height:1.02;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tb-controls{position:relative;margin-left:auto;display:flex;align-items:center;gap:12px;flex:none}
   .refresh-pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--muted);
-    background:rgba(0,0,0,.25);border:1px solid var(--edge);padding:5px 11px;border-radius:20px;font-variant-numeric:tabular-nums}
+    background:rgba(0,0,0,.3);border:1px solid rgba(232,200,119,.25);padding:5px 11px;border-radius:20px;font-variant-numeric:tabular-nums}
   .refresh-pill .rp-dot{width:6px;height:6px;border-radius:50%;background:var(--gold)}
   .refresh-pill.low{color:var(--goldB);border-color:#4a3f15}.refresh-pill.low .rp-dot{background:var(--goldB)}
+  /* Hide the centered title when the bar is too narrow for it to sit clear of
+     the brand (left) and controls (right) — prevents overlap before mobile. */
+  @media(max-width:1080px){ .tb-title{display:none} }
   .refresh-pill.out{color:var(--red-soft);border-color:#3a2020}.refresh-pill.out .rp-dot{background:var(--watchB)}
   .viewer-note{font-size:10.5px;color:var(--muted);background:rgba(0,0,0,.2);border:1px solid var(--edge);padding:5px 10px;border-radius:20px;font-weight:600}
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -262,7 +271,8 @@
     .btn{padding:6px 10px;font-size:12px}
     .btn svg{width:13px;height:13px}
     .refresh-pill{font-size:10px;padding:4px 8px}
-    .evbox{display:none}
+    .tb-title{display:none}
+    .topbar-inner{padding:11px 14px}
     /* Tables (team details, picks grid, real leaderboard): scroll sideways
        instead of crushing columns */
     .panel{overflow-x:auto}
@@ -300,6 +310,7 @@
     --gold:#c9a24e;--goldB:#e8c877;--cream:#f4eede;--muted:#8fa88a;--accent:#e8a0b4;
     --crestA:#1c3d52;--crestB:#0c2230;--glow:rgba(201,162,78,.35);
     --hdWash:rgba(125,31,58,.28);--bannerBg:#5c142a;--bannerTx:#e8c877;
+    --hdBannerA:#5c142a;--hdBannerB:rgba(61,14,30,.9);
     --leadWash:linear-gradient(90deg,rgba(201,162,78,.15),transparent 60%);
     --watchA:#5c142a;--watchB:#7d1f3a;--watchEdge:#7d1f3a;--watchGlow:rgba(178,58,92,.55);
     --watchRow:linear-gradient(90deg,rgba(125,31,58,.22),transparent 70%);
@@ -310,25 +321,35 @@
 <body>
 
 <div class="topbar">
-  <div class="brand">
-    <div class="crest" id="crest">⛳</div>
-    <div style="min-width:0">
-      <div class="name">Fairway<span class="f">Finder</span></div>
-      <div class="sub" id="brandSub">Live Tournament Tracker</div>
+  <div class="topbar-inner">
+    <div class="tb-glow"></div>
+    <!-- brand (left) -->
+    <div class="brand">
+      <div class="crest" id="crest">⛳</div>
+      <div style="min-width:0">
+        <div class="name">Fairway<span class="f">Finder</span></div>
+        <div class="sub" id="brandSub">Live Tournament Tracker</div>
+      </div>
+    </div>
+    <!-- title (centered, non-interactive so it never blocks brand/buttons) -->
+    <div class="tb-title" aria-hidden="true">
+      <div class="tb-eyebrow" id="tbEyebrow"></div>
+      <div class="tb-name" id="tbTitle"></div>
+    </div>
+    <!-- controls (right) -->
+    <div class="tb-controls">
+      <span class="refresh-pill" id="refreshPill" title="Auto-updates every 10 seconds"><span class="rp-dot"></span><span id="rpText">Loading…</span></span>
+      <button class="btn" id="refreshBtn" onclick="manualRefresh()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15"/></svg>
+        <span>Refresh scores</span>
+      </button>
+      <button class="btn ghost" id="verifyBtn" onclick="openVerifyModal()" title="Cross-check final payouts against independent sources once the tournament is over">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        <span>Verify payouts</span>
+      </button>
     </div>
   </div>
-  <div class="evbox"><div class="ev" id="evLine"></div></div>
-  <span class="refresh-pill" id="refreshPill" title="Auto-updates every 10 seconds"><span class="rp-dot"></span><span id="rpText">Loading…</span></span>
-  <button class="btn" id="refreshBtn" onclick="manualRefresh()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15"/></svg>
-    <span>Refresh scores</span>
-  </button>
-  <button class="btn ghost" id="verifyBtn" onclick="openVerifyModal()" title="Cross-check final payouts against independent sources once the tournament is over">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-    <span>Verify payouts</span>
-  </button>
 </div>
-<div class="evbanner" id="evBanner">⛳ Every stroke counts</div>
 
 <div id="verifyModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeVerifyModal()">
   <div class="modal-box">
@@ -517,15 +538,15 @@ function doneStatus(sc){
 
 /* =================== THEME ENGINE =================== */
 const THEMES = {
-  masters:{ key:'masters', crest:'⛳', sub:'The Masters · <span class="hl">Augusta National</span>',
+  masters:{ key:'masters', crest:'⛳', title:'The Masters', venue:'Augusta National, Georgia', sub:'The Masters · <span class="hl">Augusta National</span>',
     banner:'🌺 A tradition unlike any other · Augusta, Georgia' },
-  pga:{ key:'pga', crest:'🏆', sub:'PGA Championship',
+  pga:{ key:'pga', crest:'🏆', title:'PGA Championship', venue:'Quail Hollow, North Carolina', sub:'PGA Championship',
     banner:'⛳ Playing for the Wanamaker Trophy' },
-  usopen:{ key:'usopen', crest:'🏆', sub:'U.S. Open',
+  usopen:{ key:'usopen', crest:'🏆', title:'U.S. Open', venue:'Oakmont, Pennsylvania', sub:'U.S. Open',
     banner:'🇺🇸 Golf\u2019s toughest test' },
-  open:{ key:'open', crest:'🏆', sub:'The Open Championship',
+  open:{ key:'open', crest:'🏆', title:'The Open Championship', venue:'Royal Birkdale, England', sub:'The Open Championship',
     banner:'⛳ Chasing the Claret Jug' },
-  default:{ key:'', crest:'⛳', sub:'Live Tournament Tracker',
+  default:{ key:'', crest:'⛳', title:'Live Tournament Tracker', venue:'', sub:'Live Tournament Tracker',
     banner:'⛳ Every stroke counts' },
 };
 function pickTheme(evName){
@@ -543,7 +564,18 @@ function applyTheme(){
   // sub shows the event's real name if we have it, else the theme label
   const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : null;
   document.getElementById('brandSub').innerHTML = evn ? esc(evn) : t.sub;
-  document.getElementById('evBanner').innerHTML = t.banner;
+  // Centered banner title + eyebrow, driven by data (never hardcoded):
+  // title = the real event name if known, else the theme's title;
+  // eyebrow = venue plus the live round number when we have one.
+  const titleEl = document.getElementById('tbTitle');
+  const eyebrowEl = document.getElementById('tbEyebrow');
+  if(titleEl) titleEl.textContent = evn || t.title || 'Live Tournament Tracker';
+  if(eyebrowEl){
+    const rd = (typeof currentRoundNumber==='function') ? currentRoundNumber() : null;
+    const roundName = rd ? ({1:'Round 1',2:'Round 2',3:'Round 3',4:'Round 4'}[rd] || ('Round '+rd)) : '';
+    const parts = [t.venue, roundName].filter(Boolean);
+    eyebrowEl.textContent = parts.join(' · ');
+  }
 }
 
 /* =================== LOAD + REALTIME =================== */
@@ -1175,8 +1207,8 @@ function renderSetup(){
 }
 function render(){
   if(view==='board')renderBoard(); else if(view==='grid')renderGrid(); else if(view==='real')renderReal(); else renderSetup();
-  const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : '';
-  document.getElementById('evLine').textContent = evn ? (evn + (STATE.purse?(' · '+fmt(STATE.purse)):'')) : '';
+  // refresh the banner title/eyebrow (round number can advance between polls)
+  if(typeof applyTheme==='function') applyTheme();
   if(typeof updateRecapTicker==='function') updateRecapTicker();
 }
 
