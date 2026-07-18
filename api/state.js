@@ -388,7 +388,7 @@ async function fetchDataGolfLive() {
         scores[key] = { pos: 'MC', score: 'MC', name: full };
       } else {
         const rawScore = p.current_score ?? p.score ?? p.total_to_par ?? p.total;
-        scores[key] = { pos: rawPos != null ? String(rawPos) : '', score: parToInt(rawScore), makeCut: num(p.make_cut), name: full, thru, round: rd };
+        scores[key] = { pos: rawPos != null ? String(rawPos) : '', score: parToInt(rawScore), makeCut: num(p.make_cut), win: num(p.win), top20: num(p.top_20), name: full, thru, round: rd };
       }
     }
     // Diagnostic: if we got rows but couldn't extract a single usable score,
