@@ -93,8 +93,9 @@
   .tab.active{background:var(--gold);color:#071008}
   .tab:hover:not(.active){color:var(--cream)}
 
-  .panel{background:rgba(0,0,0,.18);border:1px solid var(--edge);border-radius:16px;overflow:hidden;
-    box-shadow:0 20px 50px rgba(0,0,0,.4)}
+  .panel{background:rgba(8,16,24,.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--edge);border-radius:16px;overflow:hidden;
+    box-shadow:0 20px 50px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.05)}
   .panel + .panel{margin-top:16px}
   .panel-head{padding:14px 20px;border-bottom:1px solid var(--edge2);display:flex;align-items:center;gap:11px}
   .panel-head h2{font-family:'Fraunces',serif;font-size:16px;font-weight:600}
@@ -328,7 +329,7 @@
       <div class="crest" id="crest">⛳</div>
       <div style="min-width:0">
         <div class="name">Fairway<span class="f">Finder</span></div>
-        <div class="sub" id="brandSub">Live Tournament Tracker</div>
+        <div class="sub" id="brandSub">Made by Mason Osborn</div>
       </div>
     </div>
     <!-- title (centered, non-interactive so it never blocks brand/buttons) -->
@@ -561,9 +562,9 @@ function applyTheme(){
   const t = pickTheme(STATE.event_name);
   document.documentElement.setAttribute('data-theme', t.key);
   document.getElementById('crest').textContent = t.crest;
-  // sub shows the event's real name if we have it, else the theme label
+  // brand sub-line is now a static maker credit (set in HTML) — intentionally
+  // not overwritten here. The centered banner still shows the event name.
   const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : null;
-  document.getElementById('brandSub').innerHTML = evn ? esc(evn) : t.sub;
   // Centered banner title + eyebrow, driven by data (never hardcoded):
   // title = the real event name if known, else the theme's title;
   // eyebrow = venue plus the live round number when we have one.
