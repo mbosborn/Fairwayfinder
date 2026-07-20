@@ -51,7 +51,22 @@
   .refresh-pill.low{color:var(--goldB);border-color:#4a3f15}.refresh-pill.low .rp-dot{background:var(--goldB)}
   /* Hide the centered title when the bar is too narrow for it to sit clear of
      the brand (left) and controls (right) — prevents overlap before mobile. */
-  @media(max-width:1080px){ .tb-title{display:none} }
+  /* Below 1080px the centered title would collide with brand/controls, so the
+     whole banner stacks vertically: brand → title → controls. The title goes
+     static (it's absolutely-positioned for centering on desktop) and its
+     pointer-events restore so it sits in normal flow. */
+  @media(max-width:1080px){
+    .topbar-inner{flex-direction:column;gap:12px;padding:14px 16px}
+    .tb-title{position:static;pointer-events:auto;padding:0}
+    .tb-name{font-size:23px}
+    .tb-controls{margin-left:0;justify-content:center;flex-wrap:wrap}
+  }
+  @media(max-width:700px){
+    .tb-name{font-size:21px}
+    /* icon-only buttons: hide the text label span, keep the SVG glyph */
+    .topbar .btn span{display:none}
+    .topbar .btn{padding:8px 10px}
+  }
   .refresh-pill.out{color:var(--red-soft);border-color:#3a2020}.refresh-pill.out .rp-dot{background:var(--watchB)}
   .viewer-note{font-size:10.5px;color:var(--muted);background:rgba(0,0,0,.2);border:1px solid var(--edge);padding:5px 10px;border-radius:20px;font-weight:600}
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -132,7 +147,7 @@
   .lb-amt .metaline{display:block;font-family:Inter;font-size:9.5px;font-weight:600;color:var(--muted);font-style:normal;margin-top:2px}
   .lb-row.leader{background:var(--leadWash)}
   .lb-row.leader .num,.lb-row.leader .lb-amt{color:var(--goldB)}
-  .lb-row.leader .lb-who b::after{content:var(--crownChar);font-size:11px;margin-left:6px;filter:grayscale(.1)}
+  .lb-row.leader .lb-who b::after{content:'';margin-left:0}
   .lb-row.bwatch{background:var(--watchRow)}
   .lb-row.bwatch .num{color:var(--red-soft)}
   .lb-row.bwatch::before{content:'';position:absolute;inset:0;pointer-events:none;
@@ -214,7 +229,10 @@
   #courseBg .cg-grain{position:absolute;inset:0;opacity:.05;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
   #courseBg svg{width:100%;height:100%;display:block}
   .wrap,.topbar,.evbanner{position:relative;z-index:1}
-  @media(max-width:1199px){#courseBg{display:none}}
+  @media(max-width:1199px){
+    #courseBg .cg-fade{display:none}
+    #courseBg .cg-grade{background:linear-gradient(180deg,rgba(8,19,28,.55),rgba(8,19,28,.35) 40%,rgba(8,19,28,.82))}
+  }
   .score{font-weight:700}.prize{color:var(--mist);font-weight:700}.pos{color:var(--muted);font-weight:700}
   .chk{display:inline-flex;align-items:center;justify-content:center;width:23px;height:23px;border-radius:6px;font-size:12px;font-weight:800}
   .chk.yes{background:var(--gold);color:#071008}.chk.no-cut{background:var(--watchB);color:#fff}
@@ -272,7 +290,6 @@
     .btn{padding:6px 10px;font-size:12px}
     .btn svg{width:13px;height:13px}
     .refresh-pill{font-size:10px;padding:4px 8px}
-    .tb-title{display:none}
     .topbar-inner{padding:11px 14px}
     /* Tables (team details, picks grid, real leaderboard): scroll sideways
        instead of crushing columns */
@@ -288,7 +305,7 @@
     --crestA:#155232;--crestB:#0a2b1a;--glow:rgba(236,217,74,.35);
     --hdWash:rgba(20,66,44,.45);--bannerBg:rgba(236,217,74,.1);--bannerTx:#ecd94a;
     --leadWash:linear-gradient(90deg,rgba(236,217,74,.14),transparent 60%);
-    --crownChar:'\1F3C6';
+    --crownChar:'\2605';
   }
   [data-theme="pga"]{
     --bg:#0c1220;--bg2:#080d18;--bgTop:#16233f;--edge:#2a3a54;--edge2:rgba(42,58,84,.55);
@@ -296,7 +313,7 @@
     --crestA:#28374f;--crestB:#141d30;--glow:rgba(195,201,212,.3);
     --hdWash:rgba(22,35,63,.5);--bannerBg:rgba(200,204,214,.1);--bannerTx:#cdd3de;
     --leadWash:linear-gradient(90deg,rgba(224,198,106,.14),transparent 60%);
-    --crownChar:'\1F3C6';
+    --crownChar:'\2605';
   }
   [data-theme="usopen"]{
     --bg:#0a1834;--bg2:#08101c;--bgTop:#132a4a;--edge:#1e3a6a;--edge2:rgba(30,58,106,.5);
@@ -304,7 +321,7 @@
     --crestA:#14346a;--crestB:#0a1c3e;--glow:rgba(212,178,62,.35);
     --hdWash:rgba(10,35,82,.5);--bannerBg:#0a2352;--bannerTx:#e6d089;
     --leadWash:linear-gradient(90deg,rgba(212,178,62,.16),transparent 60%);
-    --crownChar:'\1F3C6';
+    --crownChar:'\2605';
   }
   [data-theme="open"]{
     --bg:#0d1f2b;--bg2:#081620;--bgTop:#16344a;--edge:#24455a;--edge2:rgba(36,69,90,.5);
@@ -315,7 +332,7 @@
     --leadWash:linear-gradient(90deg,rgba(201,162,78,.15),transparent 60%);
     --watchA:#5c142a;--watchB:#7d1f3a;--watchEdge:#7d1f3a;--watchGlow:rgba(178,58,92,.55);
     --watchRow:linear-gradient(90deg,rgba(125,31,58,.22),transparent 70%);
-    --crownChar:'\1F3C6';
+    --crownChar:'\2605';
   }
 </style>
 </head>
@@ -326,14 +343,14 @@
     <div class="tb-glow"></div>
     <!-- brand (left) -->
     <div class="brand">
-      <div class="crest" id="crest">⛳</div>
+      <div class="crest" id="crest" style="font-family:'Fraunces',serif;font-weight:900;font-size:14px;color:#e8c877;letter-spacing:-1px;">FF</div>
       <div style="min-width:0">
         <div class="name">Fairway<span class="f">Finder</span></div>
         <div class="sub" id="brandSub">Made by Mason Osborn</div>
       </div>
     </div>
     <!-- title (centered, non-interactive so it never blocks brand/buttons) -->
-    <div class="tb-title" aria-hidden="true">
+    <div class="tb-title">
       <div class="tb-eyebrow" id="tbEyebrow"></div>
       <div class="tb-name" id="tbTitle"></div>
     </div>
@@ -593,16 +610,16 @@ function doneStatus(sc){
 
 /* =================== THEME ENGINE =================== */
 const THEMES = {
-  masters:{ key:'masters', crest:'⛳', title:'The Masters', venue:'Augusta National, Georgia', sub:'The Masters · <span class="hl">Augusta National</span>',
-    banner:'🌺 A tradition unlike any other · Augusta, Georgia' },
-  pga:{ key:'pga', crest:'🏆', title:'PGA Championship', venue:'Quail Hollow, North Carolina', sub:'PGA Championship',
-    banner:'⛳ Playing for the Wanamaker Trophy' },
-  usopen:{ key:'usopen', crest:'🏆', title:'U.S. Open', venue:'Oakmont, Pennsylvania', sub:'U.S. Open',
-    banner:'🇺🇸 Golf\u2019s toughest test' },
-  open:{ key:'open', crest:'🏆', title:'The Open Championship', venue:'Royal Birkdale, England', sub:'The Open Championship',
-    banner:'⛳ Chasing the Claret Jug' },
-  default:{ key:'', crest:'⛳', title:'Live Tournament Tracker', venue:'', sub:'Live Tournament Tracker',
-    banner:'⛳ Every stroke counts' },
+  masters:{ key:'masters', crest:'FF', title:'The Masters', venue:'Augusta National, Georgia', sub:'The Masters · <span class="hl">Augusta National</span>',
+    banner:'A tradition unlike any other · Augusta, Georgia' },
+  pga:{ key:'pga', crest:'FF', title:'PGA Championship', venue:'Quail Hollow, North Carolina', sub:'PGA Championship',
+    banner:'Playing for the Wanamaker Trophy' },
+  usopen:{ key:'usopen', crest:'FF', title:'U.S. Open', venue:'Oakmont, Pennsylvania', sub:'U.S. Open',
+    banner:'Golf\u2019s toughest test' },
+  open:{ key:'open', crest:'FF', title:'The Open Championship', venue:'Royal Birkdale, England', sub:'The Open Championship',
+    banner:'Chasing the Claret Jug' },
+  default:{ key:'', crest:'FF', title:'Live Tournament Tracker', venue:'', sub:'Live Tournament Tracker',
+    banner:'Every stroke counts' },
 };
 function pickTheme(evName){
   const n = String(evName||'').toLowerCase();
@@ -615,7 +632,7 @@ function pickTheme(evName){
 function applyTheme(){
   const t = pickTheme(STATE.event_name);
   document.documentElement.setAttribute('data-theme', t.key);
-  document.getElementById('crest').textContent = t.crest;
+  // crest is now a static "FF" monogram (set in HTML) — no longer per-theme emoji
   // brand sub-line is now a static maker credit (set in HTML) — intentionally
   // not overwritten here. The centered banner still shows the event name.
   const evn = STATE.event_name && STATE.event_name!=='Tournament' ? STATE.event_name : null;
@@ -863,7 +880,7 @@ function renderWeekendPanel(embedded){
     }
     const wasHTML = was!=null ? `<span style="color:var(--muted);font-size:10px;margin-left:5px">was ${was.toFixed(1)}</span>` : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--edge2)${isFav?';background:var(--leadWash)':''}">
-      <span style="flex:1;min-width:0;font-family:Inter,sans-serif;font-size:14px;font-weight:600;letter-spacing:.01em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.name)}${isFav?' <span style="color:var(--gold)">👑</span>':''}</span>
+      <span style="flex:1;min-width:0;font-family:Inter,sans-serif;font-size:14px;font-weight:600;letter-spacing:.01em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.name)}${isFav?' <span style="color:var(--gold);font-size:10px;font-weight:800;letter-spacing:.05em">FAV</span>':''}</span>
       ${spark(o.id)}
       <span style="width:52px;text-align:right;font-family:'Fraunces',serif;font-size:16px;font-weight:600;color:${isFav?'var(--gold)':'var(--cream)'};font-variant-numeric:tabular-nums">${pct.toFixed(1)}%</span>
       <span style="width:96px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums">${deltaHTML}${wasHTML}</span>
@@ -1041,7 +1058,7 @@ function positionRows(st,bk,any,hasBk,instant){
     r.querySelector('.lb-who b').textContent=o.name;
     r.querySelector('.lb-who i').textContent=o.team||'';
     const cs=r.querySelector('.chipspot');
-    if(isFav){ cs.className='chip fav chipspot'; cs.textContent='👑 '+pct+'%'+(MOBILE_UI?'':' FAV'); }
+    if(isFav){ cs.className='chip fav chipspot'; cs.textContent=pct+'%'+(MOBILE_UI?'':' FAV'); }
     else if(hasBk && pct!=null){ cs.className='chip chipspot'; cs.textContent=pct+'%'; }
     else { cs.className='chip chipspot'; cs.textContent=any?'—':'·'; }
     const amt=r.querySelector('.lb-amt');
