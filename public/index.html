@@ -394,14 +394,64 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // BETA: open to everyone — no login. Teams tab is editable by anyone with the link.
 
+// ============================================================
+// OFFICIAL per-position payout tables (exact dollars from the tournaments).
+// Real majors DON'T pay by a clean percentage curve — the R&A/Augusta publish
+// exact dollar figures per position that a generic % table can't reproduce.
+// Using these makes team totals match the real, official results to the dollar.
+// Each table is the solo-position payout BEFORE ties; tie-averaging is applied
+// on top by buildPrizeMap exactly as before.
+// ============================================================
+const OFFICIAL_PAYOUTS = {
+  // The Open Championship 2026 — Royal Birkdale ($17.75M). Full 78 positions.
+  open: {
+    1:3200000,2:1842000,3:1181000,4:917000,5:738000,6:639700,7:549700,8:463250,9:406200,10:367000,
+    11:334200,12:296000,13:278500,14:260700,15:241900,16:222700,17:212000,18:202000,19:193600,20:184500,
+    21:175900,22:167100,23:158100,24:149300,25:144250,26:138000,27:133000,28:128400,29:122800,30:116500,
+    31:112700,32:106900,33:103100,34:100200,35:96700,36:92900,37:88500,38:84100,39:81000,40:78400,
+    41:75200,42:71500,43:68300,44:64400,45:60700,46:57600,47:55300,48:53100,49:50700,50:49400,
+    51:48350,52:47500,53:46800,54:46100,55:45300,56:44700,57:44250,58:43950,59:43625,60:43325,
+    61:43100,62:42900,63:42700,64:42500,65:42150,66:41825,67:41500,68:41200,69:40900,70:40700,
+    71:40575,72:40450,73:40325,74:40200,75:40075,76:39950,77:39825,78:39700
+  },
+  // Masters 2026 — Augusta National ($22.5M). Official through 54th.
+  masters: {
+    1:4500000,2:2430000,3:1530000,4:1080000,5:900000,6:810000,7:753750,8:697500,9:652500,10:607500,
+    11:562500,12:517500,13:472500,14:427500,15:405000,16:382500,17:360000,18:337500,19:315000,20:292500,
+    21:270000,22:252000,23:234000,24:216000,25:198000,26:180000,27:173250,28:166500,29:159750,30:153000,
+    31:146250,32:139500,33:132750,34:127125,35:121500,36:115875,37:110250,38:105750,39:101250,40:96750,
+    41:92250,42:87750,43:83250,44:78750,45:74250,46:69750,47:65250,48:61650,49:58500,50:56700,
+    51:55350,52:54000,53:53100,54:52200
+  },
+  // PGA Championship + U.S. Open: add official tables here when those events
+  // come around (same shape). Until then they fall back to the % curve below.
+};
+// Percentage fallback — used only for events with no official table above.
 const PCT = {1:.18,2:.108,3:.068,4:.048,5:.04,6:.0362,7:.0337,8:.0312,9:.0292,10:.0272,
   11:.0252,12:.0232,13:.0215,14:.02,15:.0188,16:.0177,17:.0167,18:.0158,19:.015,20:.0143,
   21:.0136,22:.013,23:.0124,24:.0119,25:.0114,26:.011,27:.0106,28:.0102,29:.0098,30:.0095,
   35:.0079,40:.0064,45:.0052,50:.0042,55:.0038,60:.0035,65:.0032,70:.003};
+// Which official table (if any) applies to the current event.
+function officialTableFor(eventName){
+  const n=String(eventName||'').toLowerCase();
+  if(/open championship|the open\b/.test(n)) return OFFICIAL_PAYOUTS.open;
+  if(/masters/.test(n)) return OFFICIAL_PAYOUTS.masters;
+  if(/pga championship/.test(n)) return OFFICIAL_PAYOUTS.pga || null;
+  if(/u\.?s\.? open/.test(n)) return OFFICIAL_PAYOUTS.usopen || null;
+  return null;
+}
 // $ value of ONE solo position — the building block for tie-splitting below.
-// Not exported for direct use elsewhere; real payouts always go through the
-// tie-aware map, since a raw position number alone doesn't know who it's tied with.
+// Prefers the official dollar table for this event; falls back to the % curve
+// (× purse) only when no official table exists yet.
 function _prizeForSinglePos(n, purse){
+  const tbl=officialTableFor(STATE.event_name);
+  if(tbl){
+    if(tbl[n]!=null) return tbl[n];
+    // Past the last official position -> use the smallest listed value
+    // (everyone who made the cut but sits below the table's tail).
+    const ks=Object.keys(tbl).map(Number); const last=Math.max(...ks);
+    return n>last ? tbl[last] : tbl[Math.min(...ks)];
+  }
   const keys=Object.keys(PCT).map(Number).sort((a,b)=>a-b);
   for(const k of keys){ if(n<=k) return (purse||22500000)*PCT[k]; }
   return (purse||22500000)*.0025;
@@ -435,12 +485,16 @@ function buildPrizeMap(){
     (groups[s.score]=groups[s.score]||[]).push(nm);
   }
   const sortedScores=Object.keys(groups).map(Number).sort((a,b)=>a-b); // best (lowest) first
+  const usingOfficial = !!officialTableFor(STATE.event_name);
+  // Round to nearest $1,000 ONLY for the percentage estimate — official dollar
+  // tables are exact (and tie-averages like $827,500 must not be rounded away).
+  const roundShare = (v)=> usingOfficial ? Math.round(v) : Math.round(v/1000)*1000;
   const map={};
   let cursor=1; // 1-indexed leaderboard position
   for(const sc of sortedScores){
     const names=groups[sc], k=names.length;
     let sum=0; for(let i=0;i<k;i++) sum+=_prizeForSinglePos(cursor+i, purse);
-    const share=Math.round(sum/k/1000)*1000;
+    const share=roundShare(sum/k);
     for(const nm of names) map[nm]=share;
     cursor+=k;
   }
@@ -449,7 +503,7 @@ function buildPrizeMap(){
     // scored players plus these withdrawals — each WD gets that flat amount
     // independently (they're not tied with each other in a scoring sense).
     const madeCutCount = (cursor-1) + wdPaidNames.length;
-    const lastPlace = Math.round(_prizeForSinglePos(madeCutCount, purse)/1000)*1000;
+    const lastPlace = roundShare(_prizeForSinglePos(madeCutCount, purse));
     for(const nm of wdPaidNames) map[nm]=lastPlace;
   }
   // Group rule: no appearance-fee money. Anyone currently BELOW the projected
